@@ -129,12 +129,20 @@ node flows/research.mjs --self-test      # one flow's self-guard (JSON, exit 0/1
 node demo.mjs                            # the full regression backstop
 ```
 
-A live flow (reads `$LITELLM_BASE_URL` / `$LITELLM_API_KEY` from the environment):
+A live flow (reads `$LITELLM_BASE_URL` / `$LITELLM_API_KEY` from the environment).
+The base tier is **agent-supplied** — Claude IS the base, so the caller passes its
+own answer/summary as `--base-answer` (inline, `--base-answer-file`, or stdin) and
+the proxy is used only for the corroborators (`gpt-5`, `gemini-2.5-pro`, and the
+consented `perplexity-sonar`). No Claude model is ever proxy-called:
 
 ```sh
-node run.mjs --flow research --question "..." [--factcheck] [--report out.md]
-node run.mjs --flow validate --plan-file plan.txt [--factcheck] [--report out.md]
+node run.mjs --flow research --question "..." --base-answer "<your answer>" [--factcheck] [--report out.md]
+node run.mjs --flow validate --plan-file plan.txt --base-answer "<your summary>" [--factcheck] [--report out.md]
 ```
+
+With no `--base-answer`, the base model would have to be proxy-reachable (it is
+not — no Claude on the proxy), so the run returns `unknown` rather than a
+fabricated answer.
 
 Inspect a recorded scenario offline:
 
@@ -221,13 +229,30 @@ pass; it exits non-zero if any flow stops being able to fire its negative contro
 (verified by deliberately dropping the risks fixture below the threshold, watching
 `demo.mjs` go red, then restoring it).
 
-**Built, proven against fixtures, but not yet exercised against a live proxy.** The
-live path (`lib/_proxy.mjs` -> a real LiteLLM proxy -> real base/GPT-5/Gemini/
-Perplexity calls) is unverified until pointed at a reachable proxy with
-`$LITELLM_BASE_URL` / `$LITELLM_API_KEY` set. It is the SAME orchestration code the
-fixtures exercise (the fixture loader is a drop-in for `_proxy.mjs`), so the chain
-logic is proven; only the transport and the live models are unconfirmed. Absent a
-proxy, every flow returns `unknown` — by design, never a silent answer.
+**LIVE-verified against the proxy.** The live path (`lib/_proxy.mjs` -> a real
+LiteLLM proxy -> real corroborator calls) has been exercised end-to-end. The base
+tier is **supplied by the calling agent** (Claude IS the base, as in the original
+`/research` and `/validate` skills) — it is never proxy-called, because the proxy
+serves no Claude model. Only the corroborators go over the wire: `gpt-5`,
+`gemini-2.5-pro`, and the consented `perplexity-sonar` fact-check.
+
+- A live `research` run with `--base-answer "Paris."` to *"What is the capital of
+  France?"*: base `responded=true` (`via: agent`), `gpt-5` and `gemini-2.5-pro`
+  both responded and concurred → `status=pass`, `confidence=HIGH`,
+  `verdict=validated`, `corroborated=true`.
+- A live `validate` run with an agent-supplied base summary against a risky plan:
+  `gpt-5` raised ≥3 substantive risks and dissented → escalation fired per the
+  manifest ≥3 rule (`escalated=true`, `verdict=escalated`). When the revalidator
+  (`gemini-2.5-pro`) timed out, it was recorded `responded=false` and NOT counted
+  as corroboration — `confidence` stayed honest (MEDIUM), never fabricated.
+- With no `--base-answer` and the base model unreachable, the run returns
+  `unknown` ("the calling agent must supply its own answer via --base-answer") —
+  never a single-model answer dressed up as cross-validated.
+
+It is the SAME orchestration code the fixtures exercise (the fixture loader is a
+drop-in for `_proxy.mjs`), so the offline invariants and the live transport are
+now both confirmed. The API key is read from the environment only and never
+appears in any emitted output (grep-verified on the live runs above).
 
 **The weaker-fit entry point, said plainly.** `scheduled/` is provided but
 honestly scoped: consult is request-driven, so a timer fits only the narrow

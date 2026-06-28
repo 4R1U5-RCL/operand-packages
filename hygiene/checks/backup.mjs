@@ -40,6 +40,7 @@ import { Result, emitResult } from "./_common.mjs";
 import {
   walkTree, createArchive, verifyArchive, listEntries, sha256File,
   stageCopy, injectSentinel, mkTmpDir, SENTINEL_NAME,
+  sharedExclude, mergeExclude,
 } from "./_fsutil.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -55,10 +56,18 @@ function loadManifest() {
   return JSON.parse(readFileSync(MANIFEST, "utf8"));
 }
 
+// The one exclude set: shared vendored/cache/non-IOPHON dirs (manifests/
+// _exclude.json) merged with backup-specific excludes (prior archives, secrets).
+// Applied IDENTICALLY to the expected-file walk and to tar — the invariant that
+// makes expected == archived on a real tree.
+function loadExclude(m) {
+  return mergeExclude(sharedExclude(PKG), m.exclude || []);
+}
+
 // Returns { ok, injected, fired, note }. ok=false => verifier is broken.
 function selfGuard() {
   const m = loadManifest();
-  const exclude = m.exclude.filter((e) => e !== "data/backups"); // fixture has none anyway
+  const exclude = loadExclude(m).filter((e) => e !== "data/backups"); // fixture has none anyway
   let stage, posDir, negDir;
   try {
     stage = stageCopy(FIX_TREE, "hygiene-bkp-stage-");
@@ -124,7 +133,8 @@ function dryRun(target) {
   }
 
   const m = loadManifest();
-  const expected = walkTree(target, { exclude: m.exclude }).map((e) => e.rel);
+  const exclude = loadExclude(m);
+  const expected = walkTree(target, { exclude }).map((e) => e.rel);
   if (expected.length === 0) {
     return r.set("unknown", {
       evidence: `target ${target} has 0 in-scope files (after excludes) — nothing to back up or unreadable`,
@@ -134,7 +144,7 @@ function dryRun(target) {
   const outDir = mkTmpDir("hygiene-bkp-dry-");
   const outPath = join(outDir, "dryrun.tar.gz");
   try {
-    const c = createArchive(target, outPath, m.exclude);
+    const c = createArchive(target, outPath, exclude);
     if (!c.ok) {
       return r.set("unknown", { evidence: `tar could not build a trial archive: ${c.error}`,
         message: "backup: archive tooling failed (unverifiable)" });
@@ -168,7 +178,8 @@ function apply(target) {
   }
 
   const m = loadManifest();
-  const expected = walkTree(target, { exclude: m.exclude }).map((e) => e.rel);
+  const exclude = loadExclude(m);
+  const expected = walkTree(target, { exclude }).map((e) => e.rel);
   if (expected.length === 0) {
     return r.set("unknown", {
       evidence: `target ${target} has 0 in-scope files (after excludes) — nothing to back up or unreadable`,
@@ -179,7 +190,7 @@ function apply(target) {
   mkdirSync(outDir, { recursive: true });
   const archivePath = join(outDir, tsName(m.archive_prefix));
 
-  const c = createArchive(target, archivePath, m.exclude);
+  const c = createArchive(target, archivePath, exclude);
   if (!c.ok) {
     return r.set("unknown", { evidence: `tar could not write the archive: ${c.error}`,
       message: "backup --apply: archive tooling failed (no backup written)" });

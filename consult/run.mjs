@@ -58,7 +58,9 @@ function syntheticUnknown(flow, message) {
 
 function runFlow(flow, argv) {
   const script = join(FLOWS, `${flow}.mjs`);
-  const r = spawnSync("node", [script, ...argv], { encoding: "utf8" });
+  // Inherit stdin so a piped base answer reaches the flow (Claude is the base
+  // tier — the agent may pipe its own answer in). stdout/stderr stay captured.
+  const r = spawnSync("node", [script, ...argv], { encoding: "utf8", stdio: ["inherit", "pipe", "pipe"] });
   if (r.error) return syntheticUnknown(flow, `failed to spawn flow: ${r.error.message}`);
   const line = (r.stdout || "").trim().split("\n").filter(Boolean).pop();
   try { return JSON.parse(line); }

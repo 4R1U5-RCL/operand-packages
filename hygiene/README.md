@@ -168,6 +168,18 @@ node run.mjs --self-test                        # every control's negative contr
 - **Rules are scope, not omniscience.** `manifests/cleanup.json` is the FIXED set
   of kinds cleanup knows. A file of an *unknown* kind is not drift — it is simply
   out of scope, reported as neither stray nor in-place. Add a rule to extend scope.
+- **The tree has vendored / transient regions hygiene does NOT touch.** One shared
+  exclude set (`manifests/_exclude.json`) is read by BOTH controls and applied
+  *identically* to every walk **and** to `tar --exclude=`. It prunes
+  `.git`, `node_modules`, `.pnpm-store`, `.next`, `plugins` (the plugin cache —
+  its bundled `SKILL.md`/`*.md` are plugin payload, **not** misplaced IOPHON
+  docs), `projects` (multi-GB conversation JSONL histories), and `cache`. Each is
+  transient/regenerable or not IOPHON-managed. Excluding them is what keeps
+  `cleanup` from false-flagging 2,585 plugin-cache files as strays, and what makes
+  `backup`'s expected-file walk agree with the archive (the equality the verifier
+  needs). Matching mirrors GNU tar's default *unanchored* exclude (a bare name
+  matches that directory at any depth and prunes its whole subtree), so the walk
+  and the archive see the identical set.
 
 ---
 
@@ -218,13 +230,32 @@ extractability + complete capture, and the sentinel-miss negative control fires)
 `demo.mjs` proves both controls earn their verdicts and exits non-zero if either
 stops being able to fail its bad input.
 
-**Built, but exercised against a real `~/.claude` only on the host.** The live
-**scheduled run** over an operator's actual home tree (`backup --apply` writing a
-real archive into `data/backups/`, and the drift report over real content) is
-proven here against fixtures and temp copies, but its behaviour on a specific
-host's tree is only seen when run there. The mechanism is identical — the same
-`checks/` underneath — so the gap is *coverage of one real tree*, not unverified
-logic.
+**Verified against the real `~/.claude` tree (~122k files), not just fixtures.**
+A smoke test against the actual home tree — `plugins/cache/**`, nested `.git`
+repos, `node_modules`, multi-GB `projects/` histories — initially exposed two
+real-environment bugs, now fixed and re-verified:
+
+- **Scope.** `cleanup` had flagged 2,585 `plugins/cache/**/SKILL.md` files as
+  stray skills, and `backup`'s expected-file walk counted 122,693 files while tar
+  archived only 8,815 (the walk's matcher didn't prune nested `.git`/`node_modules`
+  the way tar does). Fixed with the one shared exclude set above, applied
+  identically to walk and tar. After the fix, on the live tree:
+  `cleanup` → **0 stray** (159 in place, 0 plugin-cache false positives);
+  `backup` dry-run → **pass**, `expected_files == archive_entries` (2054 == 2054),
+  sha256 stable, extractable, `missing: []`. A `--apply` into a temp tree wrote
+  and re-verified a real archive (expected == archived, sha matches the written
+  `.sha256`, extracts clean, vendored dirs absent), and `cleanup` then classifies
+  the produced `backup_*.tar.gz` as in-place.
+- **Buffering.** `run.mjs` (and the scheduled wrapper, and the `tar` spawns in
+  `_fsutil`) spawned children with the 1 MB `spawnSync` default; a real
+  `cleanup` line was ~935 KB and one larger tree overflowed → unparseable output
+  → a false `unknown`. Raised to 64 MB, and `cleanup`'s inline evidence list is
+  now capped at the first 50 examples (`(+N more)`), with the full list/count kept
+  in `details.stray`.
+
+The only remaining real-tree gap is the **unattended scheduled run on a specific
+operator's host** — the mechanism is identical (same `checks/` underneath), so
+the gap is *cron coverage*, not unverified logic.
 
 **Out of code scope (named, not silently skipped).** The **off-system copy** of a
 verified archive (the P2 step the tool can only remind about), the **semantic

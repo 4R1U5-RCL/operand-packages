@@ -53,8 +53,12 @@ if (!target && configPath) {
 }
 if (!target) target = join(homedir(), ".claude");
 
+// Match run.mjs / _fsutil's buffer headroom: a real ~/.claude produces large
+// aggregate JSON, and the 1 MB spawnSync default would truncate it → bad parse.
+const MAXBUF = 64 * 1024 * 1024;
+
 function dispatch(extraArgs) {
-  const r = spawnSync("node", [RUN, "--target", target, ...extraArgs], { encoding: "utf8" });
+  const r = spawnSync("node", [RUN, "--target", target, ...extraArgs], { encoding: "utf8", maxBuffer: MAXBUF });
   if (r.stderr) process.stderr.write(r.stderr);
   let agg = null;
   try { agg = JSON.parse(r.stdout); } catch { /* */ }

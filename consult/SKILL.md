@@ -51,12 +51,30 @@ node <skill-dir>/run.mjs --self-test
 ```
 
 A live flow (needs a reachable LiteLLM proxy; reads `$LITELLM_BASE_URL` and
-`$LITELLM_API_KEY` from the environment — never written to a file, never logged):
+`$LITELLM_API_KEY` from the environment — never written to a file, never logged).
+
+**YOU are the base tier.** As in the original `/research` and `/validate` skills,
+Claude is the base model — so you pass YOUR OWN answer (research) or YOUR OWN
+neutral summary + strengths (validate) as `--base-answer`, and the proxy is used
+only to have GPT-5 + Gemini cross-validate it. The base answer can be passed
+inline (`--base-answer "..."`), from a file (`--base-answer-file path`), or piped
+on stdin. The proxy serves no Claude model, so it is **never** called for the
+base — only the corroborators (`gpt-5`, `gemini-2.5-pro`, and the consented
+`perplexity-sonar` fact-check) go over the wire.
 
 ```sh
-node <skill-dir>/run.mjs --flow research --question "..." [--factcheck] [--report out.md]
-node <skill-dir>/run.mjs --flow validate --plan-file plan.txt [--factcheck] [--report out.md]
+# research: pass your own answer as the base; GPT-5 + Gemini cross-validate it
+node <skill-dir>/run.mjs --flow research --question "..." --base-answer "<your answer>" [--factcheck] [--report out.md]
+
+# validate: pass your own neutral summary + STRENGTH: lines as the base; GPT-5 finds risks
+node <skill-dir>/run.mjs --flow validate --plan-file plan.txt --base-answer "<your summary>" [--factcheck] [--report out.md]
 ```
+
+If no `--base-answer` is supplied, the base model would have to be proxy-reachable
+— it is not (no Claude on the proxy) — so the run returns `unknown` with the
+message *"no base answer supplied and base model not reachable — the calling agent
+must supply its own answer via --base-answer"*. That is honest, not a failure to
+work around: supply your answer.
 
 Inspect a single flow against a recorded fixture scenario (offline):
 

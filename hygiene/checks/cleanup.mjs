@@ -32,7 +32,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Result, emitResult } from "./_common.mjs";
-import { scanTree, guardedMove } from "./_fsutil.mjs";
+import { scanTree, guardedMove, sharedExclude, mergeExclude } from "./_fsutil.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
@@ -48,13 +48,21 @@ function loadManifest() {
   return JSON.parse(readFileSync(MANIFEST, "utf8"));
 }
 
+// The one exclude set: the shared vendored/cache/non-IOPHON dirs (manifests/
+// _exclude.json) merged with any cleanup-specific excludes. Applied to every
+// scanTree() walk so the classifier never sees plugin-cache/node_modules content.
+function loadExclude(m) {
+  return mergeExclude(sharedExclude(PKG), m.exclude || []);
+}
+
 // Returns { ok, injected, fired, note }. ok=false => detector is broken.
 function selfGuard() {
   const m = loadManifest();
+  const exclude = loadExclude(m);
   let bad, good;
   try {
-    bad = scanTree(FIX_BAD, m.rules, m.exclude);
-    good = scanTree(FIX_GOOD, m.rules, m.exclude);
+    bad = scanTree(FIX_BAD, m.rules, exclude);
+    good = scanTree(FIX_GOOD, m.rules, exclude);
   } catch (e) {
     return { ok: false, injected: false, fired: false, note: `fixtures unreadable: ${e.message}` };
   }
@@ -88,7 +96,7 @@ function run(target) {
   }
 
   const m = loadManifest();
-  const { stray, inPlace, scanned } = scanTree(target, m.rules, m.exclude);
+  const { stray, inPlace, scanned } = scanTree(target, m.rules, loadExclude(m));
   r.detail({ scanned, in_place: inPlace.length, stray_count: stray.length,
              stray: stray.map((s) => ({ from: s.from, to: s.to, rule: s.rule })) });
 
@@ -99,9 +107,13 @@ function run(target) {
       message: "cleanup: no classifiable files at target (unverifiable)" });
   }
   if (stray.length) {
-    const listed = stray.map((s) => `${s.from} -> ${s.to}`).join("; ");
+    // Bound the inline example list (good hygiene; also keeps stdout well under
+    // the spawn buffer). The FULL list + count stay in `details.stray`.
+    const CAP = 50;
+    const listed = stray.slice(0, CAP).map((s) => `${s.from} -> ${s.to}`).join("; ");
+    const more = stray.length > CAP ? ` (+${stray.length - CAP} more — see details.stray)` : "";
     return r.set("fail", {
-      evidence: `${stray.length} stray file(s) violating the canonical layout: ${listed}`,
+      evidence: `${stray.length} stray file(s) violating the canonical layout: ${listed}${more}`,
       message: `cleanup: ${stray.length} stray file(s) (drift) — run --apply to tidy` });
   }
   return r.set("pass", {
@@ -121,7 +133,8 @@ function apply(target) {
   }
 
   const m = loadManifest();
-  const before = scanTree(target, m.rules, m.exclude);
+  const exclude = loadExclude(m);
+  const before = scanTree(target, m.rules, exclude);
   const moved = [], refused = [], failed = [];
   for (const s of before.stray) {
     const mv = guardedMove(target, s.from, s.to);
@@ -129,7 +142,7 @@ function apply(target) {
     else if (mv.refused) refused.push({ from: s.from, to: s.to, reason: mv.reason });
     else failed.push({ from: s.from, to: s.to, reason: mv.reason });
   }
-  const after = scanTree(target, m.rules, m.exclude);
+  const after = scanTree(target, m.rules, exclude);
   r.detail({ moved, refused, failed, stray_before: before.stray.length, stray_after: after.stray.length });
 
   if (failed.length || refused.length) {

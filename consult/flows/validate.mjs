@@ -139,25 +139,35 @@ async function run(opts) {
   if (!sg.ok) return r.set("unknown", { evidence: sg.note,
     message: "validate self-guard could not be exercised — verdict not trustworthy" });
 
-  let callModel, plan;
+  let callModel, plan, baseAnswer = null;
   if (opts.fixtures) {
     callModel = makeFixtureCallModel(resolvePath(opts.fixtures), m);
     plan = opts.plan || "(offline fixture scenario)";
   } else {
     callModel = makeProxyCallModel();
     plan = opts.plan;
+    baseAnswer = opts.baseAnswer ?? null;
     if (!plan) return r.set("unknown", { evidence: "no --plan/--plan-file and no --fixtures",
       message: "validate: nothing to run" });
   }
 
-  const v = await runValidate({ plan, manifest: m, callModel, factcheck: opts.factcheck });
+  const v = await runValidate({ plan, manifest: m, callModel, baseAnswer, factcheck: opts.factcheck });
   r.chain(v);
 
   if (opts.report) { try { writeFileSync(opts.report, renderReport(v)); } catch { /* non-fatal */ } }
 
-  if (v.verdict === "unknown") return r.set("unknown", {
-    evidence: `a tier could not be reached/parsed; ${v.downgrade_note || ""}`,
-    message: "validate: chain incomplete — verdict unknown (never a fabricated cross-validation)" });
+  if (v.verdict === "unknown") {
+    // Base summary comes from the calling agent (Claude IS the base tier). A live
+    // run with no --base-answer falls back to the base MODEL, which the proxy
+    // does not serve — say so plainly rather than a generic "tier" message.
+    const base = (v.tiers || []).find((t) => t.role === "base");
+    if (!opts.fixtures && !baseAnswer && (!base || !base.responded)) return r.set("unknown", {
+      evidence: `no base answer supplied and base model not reachable; ${v.downgrade_note || ""}`,
+      message: "no base answer supplied and base model not reachable — the calling agent must supply its own answer via --base-answer" });
+    return r.set("unknown", {
+      evidence: `a tier could not be reached/parsed; ${v.downgrade_note || ""}`,
+      message: "validate: chain incomplete — verdict unknown (never a fabricated cross-validation)" });
+  }
   return r.set("pass", {
     evidence: `chain ran as specified; escalated=${v.escalated}, confidence=${v.confidence} ` +
               `(inter-model agreement, NOT correctness). ${sg.note}`,
@@ -165,6 +175,20 @@ async function run(opts) {
 }
 
 function flag(argv, name) { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; }
+
+// The base summary is the CALLING AGENT'S own neutral summary (Claude is the base
+// tier, as in the original /validate skill). Accept it inline (--base-answer),
+// from a file (--base-answer-file), or piped on stdin. undefined => none supplied.
+function resolveBaseAnswer(argv) {
+  const direct = flag(argv, "--base-answer");
+  if (direct != null) return direct;
+  const file = flag(argv, "--base-answer-file");
+  if (file) { try { return readFileSync(file, "utf8"); } catch { return undefined; } }
+  if (!process.stdin.isTTY) {
+    try { const s = readFileSync(0, "utf8"); if (s && s.trim() !== "") return s; } catch { /* no stdin */ }
+  }
+  return undefined;
+}
 
 async function main(argv) {
   if (argv.includes("--self-test")) {
@@ -176,6 +200,7 @@ async function main(argv) {
   const opts = {
     fixtures: flag(argv, "--fixtures"),
     plan,
+    baseAnswer: resolveBaseAnswer(argv),
     factcheck: argv.includes("--factcheck"),
     report: flag(argv, "--report"),
   };

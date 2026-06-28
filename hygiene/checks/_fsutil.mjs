@@ -19,6 +19,11 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 
+// spawnSync defaults to a 1 MB stdout/stderr buffer; a real ~/.claude tree blows
+// past that (tar listings, large drift reports) and silently truncates → garbled
+// output and a false `unknown`. Give every spawn here generous headroom.
+const MAXBUF = 64 * 1024 * 1024;
+
 // ── globbing ────────────────────────────────────────────────────────────────
 // Minimal glob → RegExp. For cleanup basenames `*` matches anything (no slashes
 // in a basename anyway). For tar-exclude paths `*` matches ACROSS slashes, to
@@ -33,10 +38,33 @@ export function matchAnyGlob(name, globs) {
   return globs.some((g) => basenameGlob(g).test(name));
 }
 
+// ── the shared exclude set ──────────────────────────────────────────────────
+// ONE source of truth (manifests/_exclude.json), read by both controls and
+// applied identically to the walk AND to tar. mergeExclude de-dupes the shared
+// set with a control's own manifest excludes, preserving order.
+export function sharedExclude(pkgDir) {
+  try {
+    const j = JSON.parse(readFileSync(join(pkgDir, "manifests", "_exclude.json"), "utf8"));
+    return Array.isArray(j.shared_exclude) ? j.shared_exclude : [];
+  } catch { return []; }
+}
+
+export function mergeExclude(...lists) {
+  const seen = new Set();
+  const out = [];
+  for (const l of lists) for (const x of l || []) {
+    if (!seen.has(x)) { seen.add(x); out.push(x); }
+  }
+  return out;
+}
+
 // ── tree walk ─────────────────────────────────────────────────────────────────
-// Returns file entries { rel, full } with POSIX-style `rel` (forward slashes,
-// no leading "./"). Skips .git always; applies tar-style exclude patterns so the
-// walk and the archive agree on what is in scope.
+// Returns entries { rel, full } with POSIX-style `rel` (forward slashes, no
+// leading "./"). Counts regular files AND symlinks — tar archives symlinks as
+// their own members, so the walk must too or the expected set and the archive
+// disagree. Applies the exclude set at DIRECTORY granularity (an excluded dir is
+// not descended into), exactly mirroring how GNU tar skips an excluded subtree,
+// so the walk and the archive see the identical set.
 export function walkTree(root, { exclude = [], skipGit = true } = {}) {
   const out = [];
   const walk = (dir) => {
@@ -46,26 +74,41 @@ export function walkTree(root, { exclude = [], skipGit = true } = {}) {
     for (const e of entries) {
       const full = join(dir, e.name);
       const rel = relative(root, full).split(sep).join("/");
-      if (skipGit && (rel === ".git" || rel.startsWith(".git/"))) continue;
-      if (tarExcluded(rel, exclude)) continue;
+      if (skipGit && e.name === ".git") continue;       // any-depth .git, like tar
+      if (isExcluded(rel, exclude)) continue;
       if (e.isDirectory()) walk(full);
-      else if (e.isFile()) out.push({ rel, full });
+      else out.push({ rel, full });                     // files + symlinks
     }
   };
   walk(root);
   return out.sort((a, b) => a.rel.localeCompare(b.rel));
 }
 
-// Mirror GNU tar `--exclude=PATTERN` for the patterns we use: a plain path
-// excludes that path and its whole subtree; a pattern with `*` is a glob across
-// slashes. Patterns are matched against the member's relative path.
-export function tarExcluded(rel, patterns) {
-  for (const p of patterns) {
-    const pat = p.replace(/^\.\//, "").replace(/\/$/, "");
-    if (pat.includes("*")) {
-      if (basenameGlob(pat).test(rel)) return true;
+// Mirror GNU tar's DEFAULT (unanchored) `--exclude=PATTERN` semantics for the
+// pattern shapes we use, so a single exclude set drives both the walk and tar:
+//   - bare name (no slash, no `*`)  e.g. node_modules, .git, plugins, cache
+//        → matches if ANY path component equals it (the dir and its whole
+//          subtree at any depth — tar skips such a directory wherever it sits).
+//   - basename glob (no slash, has `*`) e.g. *.tar.gz, .env.*
+//        → matches against the member's final component, at any depth.
+//   - path with a slash  e.g. data/backups
+//        → matches that path at the root or nested (unanchored), incl. subtree.
+// Matching at directory granularity in walkTree means an excluded dir is never
+// descended, exactly as tar prunes an excluded subtree.
+export function isExcluded(rel, patterns) {
+  if (!patterns || patterns.length === 0) return false;
+  const comps = rel.split("/");
+  const base = comps[comps.length - 1];
+  for (const raw of patterns) {
+    const p = String(raw).replace(/^\.\//, "").replace(/\/$/, "");
+    if (!p) continue;
+    if (p.includes("/")) {
+      if (rel === p || rel.startsWith(p + "/") ||
+          rel.endsWith("/" + p) || rel.includes("/" + p + "/")) return true;
+    } else if (p.includes("*")) {
+      if (basenameGlob(p).test(base)) return true;
     } else {
-      if (rel === pat || rel.startsWith(pat + "/")) return true;
+      if (comps.includes(p)) return true;
     }
   }
   return false;
@@ -148,18 +191,21 @@ export function createArchive(srcDir, outPath, exclude = []) {
   const args = ["-czf", outPath];
   for (const p of exclude) args.push(`--exclude=${p.replace(/^\.\//, "").replace(/\/$/, "")}`);
   args.push("-C", srcDir, ".");
-  const r = spawnSync("tar", args, { encoding: "utf8" });
+  const r = spawnSync("tar", args, { encoding: "utf8", maxBuffer: MAXBUF });
   if (r.error) return { ok: false, error: r.error.message };
   if (r.status !== 0) return { ok: false, error: (r.stderr || "").trim() || `tar exit ${r.status}` };
   return { ok: true };
 }
 
-// List archive members as POSIX rel paths (strip leading "./", drop dir entries).
+// List archive members as POSIX rel paths (strip leading "./"). DROP directory
+// entries (tar lists them with a trailing "/") so the listing is files+symlinks
+// only — the same shape walkTree produces, which is what makes expected == archived.
 export function listEntries(archivePath) {
-  const r = spawnSync("tar", ["-tzf", archivePath], { encoding: "utf8" });
+  const r = spawnSync("tar", ["-tzf", archivePath], { encoding: "utf8", maxBuffer: MAXBUF });
   if (r.error || r.status !== 0) return { ok: false, entries: [], error: (r.stderr || r.error?.message || "").trim() };
   const entries = (r.stdout || "").split("\n")
-    .map((s) => s.replace(/^\.\//, "").replace(/\/$/, ""))
+    .filter((s) => s.length > 0 && !s.endsWith("/"))          // drop directory members
+    .map((s) => s.replace(/^\.\//, ""))
     .filter((s) => s.length > 0);
   return { ok: true, entries };
 }
@@ -168,7 +214,7 @@ export function listEntries(archivePath) {
 // throwaway temp dir and confirm tar reports success.
 export function extractTest(archivePath) {
   const dst = mkTmpDir("hygiene-extract-");
-  const r = spawnSync("tar", ["-xzf", archivePath, "-C", dst], { encoding: "utf8" });
+  const r = spawnSync("tar", ["-xzf", archivePath, "-C", dst], { encoding: "utf8", maxBuffer: MAXBUF });
   const ok = !r.error && r.status === 0;
   try { rmSync(dst, { recursive: true, force: true }); } catch { /* best effort */ }
   return { ok, error: ok ? "" : (r.stderr || r.error?.message || "").trim() };

@@ -2,11 +2,11 @@
   "flow": "validate",
   "purpose": "Cross-validate a plan/proposal: base summary -> validator finds risks -> ESCALATE to revalidator on >=3 substantive risks or uncertainty.",
   "tiers": [
-    { "role": "base",        "model": "claude-opus-4-8",  "purpose": "neutral summary + strengths" },
-    { "role": "validator",   "model": "gpt-5",            "purpose": "find substantive risks" },
-    { "role": "revalidator", "model": "gemini-2.5-pro",   "purpose": "re-assess (only when escalated)" }
+    { "role": "base",        "model": "claude-opus-4-8",  "via": "agent", "purpose": "neutral summary + strengths (supplied by the calling agent — Claude IS the base tier; no proxy call)" },
+    { "role": "validator",   "model": "gpt-5",            "via": "proxy", "purpose": "find substantive risks" },
+    { "role": "revalidator", "model": "gemini-2.5-pro",   "via": "proxy", "purpose": "re-assess (only when escalated)" }
   ],
-  "factcheck": { "role": "factcheck", "model": "perplexity/sonar", "purpose": "optional web fact-check of external claims", "optional": true, "requires_consent": true },
+  "factcheck": { "role": "factcheck", "model": "perplexity-sonar", "via": "proxy", "purpose": "optional web fact-check of external claims", "optional": true, "requires_consent": true },
   "escalation": {
     "risk_threshold": 3,
     "escalate_on_uncertainty": true,

@@ -26,6 +26,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const MANIFESTS = join(HERE, "manifests");
 const CHECKS = join(HERE, "checks");
 
+// A real ~/.claude makes a control's JSON line large (cleanup's drift report ran
+// ~935 KB). spawnSync's default 1 MB buffer silently truncates past that → the
+// JSON won't parse → a false `unknown`. Give the child generous headroom.
+const MAXBUF = 64 * 1024 * 1024;
+
 function expandHome(p) {
   if (!p) return p;
   if (p === "~") return homedir();
@@ -66,7 +71,7 @@ function runCheck(control, surface, opts) {
   const script = join(CHECKS, `${control}.mjs`);
   const argv = ["--target", opts.target];
   if (opts.apply) argv.push("--apply");
-  const r = spawnSync("node", [script, ...argv], { encoding: "utf8" });
+  const r = spawnSync("node", [script, ...argv], { encoding: "utf8", maxBuffer: MAXBUF });
   // controls print the off-system reminder / diagnostics on stderr; surface it.
   if (r.stderr) process.stderr.write(r.stderr);
   if (r.error) return syntheticUnknown(control, surface, `failed to spawn control: ${r.error.message}`);
@@ -79,7 +84,7 @@ function runCheck(control, surface, opts) {
 }
 
 function runSelfTest(control) {
-  const r = spawnSync("node", [join(CHECKS, `${control}.mjs`), "--self-test"], { encoding: "utf8" });
+  const r = spawnSync("node", [join(CHECKS, `${control}.mjs`), "--self-test"], { encoding: "utf8", maxBuffer: MAXBUF });
   let obj = null;
   try { obj = JSON.parse((r.stdout || "").trim().split("\n").filter(Boolean).pop()); } catch { /* */ }
   return { control, ok: obj?.self_guard_ok === true, exit: r.status, note: obj?.note ?? "" };

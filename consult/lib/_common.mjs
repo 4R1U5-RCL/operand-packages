@@ -177,7 +177,7 @@ export class Result {
       verdict: v ? v.verdict : null,
       escalated: v && typeof v.escalated === "boolean" ? v.escalated : null,
       tiers: v ? v.tiers.map((t) => ({
-        role: t.role, model: t.model, responded: t.responded,
+        role: t.role, model: t.model, via: t.via ?? null, responded: t.responded,
         stance: t.stance ?? null, optionalSkipped: Boolean(t.optionalSkipped),
         error: t.error ?? null,
       })) : [],

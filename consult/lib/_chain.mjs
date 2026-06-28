@@ -77,9 +77,28 @@ async function callTier(callModel, tier, prompt) {
   const p = parseModelResponse(raw);
   return {
     role: tier.role, model: tier.model, purpose: tier.purpose,
+    via: tier.via ?? "proxy",
     responded: p.responded, text: p.text, error: p.error,
     stance: p.responded ? parseStance(p.text) : null,
   };
+}
+
+// The base answer is supplied by the CALLING AGENT — Claude IS the base tier, as
+// in the original /research and /validate skills. It is recorded as a responded
+// tier WITHOUT any proxy call (the proxy has no Claude model and serves only the
+// corroborators). Nothing is fabricated: the position is exactly the text the
+// caller passed in. When no base answer is supplied, callers fall back to
+// callTier against the base model, which — being unreachable — yields unknown.
+function agentBaseTier(tier, answer) {
+  return {
+    role: tier.role, model: tier.model, purpose: tier.purpose,
+    via: tier.via ?? "agent",
+    responded: true, text: String(answer), error: null,
+    stance: "concur",
+  };
+}
+function hasBaseAnswer(baseAnswer) {
+  return baseAnswer != null && String(baseAnswer).trim() !== "";
 }
 
 // ── Prompt builders (live only; markers requested so parsing is deterministic) ─
@@ -116,10 +135,15 @@ function revalidatorPromptValidate(plan, riskText) {
 // ── research flow ─────────────────────────────────────────────────────────────
 // base answer -> validator -> revalidator (+ optional consented fact-check),
 // then assign a confidence label from inter-model agreement.
-export async function runResearch({ question, manifest, callModel, factcheck = false }) {
+export async function runResearch({ question, manifest, callModel, baseAnswer = null, factcheck = false }) {
   const minForHigh = manifest.confidence?.min_corroborating_responders_for_high ?? 2;
 
-  const base = await callTier(callModel, byRole(manifest, "base"), basePromptResearch(question));
+  const baseTier = byRole(manifest, "base");
+  // Base is agent-supplied (no proxy call) when provided; otherwise fall back to
+  // proxy-calling the base model (unreachable for Claude => unknown downstream).
+  const base = hasBaseAnswer(baseAnswer)
+    ? agentBaseTier(baseTier, baseAnswer)
+    : await callTier(callModel, baseTier, basePromptResearch(question));
   const validator = await callTier(callModel, byRole(manifest, "validator"),
     validatorPromptResearch(question, base.text));
   const revalidator = await callTier(callModel, byRole(manifest, "revalidator"),
@@ -137,6 +161,7 @@ export async function runResearch({ question, manifest, callModel, factcheck = f
       tiers.push(fc);
     } else {
       tiers.push({ role: manifest.factcheck.role, model: manifest.factcheck.model,
+        via: manifest.factcheck.via ?? "proxy",
         responded: false, optionalSkipped: true, stance: null,
         error: "fact-check not invoked (consent not given)" });
     }
@@ -178,12 +203,17 @@ export async function runResearch({ question, manifest, callModel, factcheck = f
 // ── validate flow ─────────────────────────────────────────────────────────────
 // base summary -> validator finds risks -> ESCALATE to revalidator if the
 // validator raises >= threshold substantive risks OR expresses uncertainty.
-export async function runValidate({ plan, manifest, callModel, factcheck = false }) {
+export async function runValidate({ plan, manifest, callModel, baseAnswer = null, factcheck = false }) {
   const threshold = manifest.escalation?.risk_threshold ?? 3;
   const escalateOnUncertainty = manifest.escalation?.escalate_on_uncertainty ?? true;
   const minForHigh = manifest.confidence?.min_corroborating_responders_for_high ?? 1;
 
-  const base = await callTier(callModel, byRole(manifest, "base"), basePromptValidate(plan));
+  const baseTier = byRole(manifest, "base");
+  // Base summary is agent-supplied (no proxy call) when provided; otherwise fall
+  // back to proxy-calling the base model (unreachable for Claude => unknown).
+  const base = hasBaseAnswer(baseAnswer)
+    ? agentBaseTier(baseTier, baseAnswer)
+    : await callTier(callModel, baseTier, basePromptValidate(plan));
   const validator = await callTier(callModel, byRole(manifest, "validator"), validatorPromptValidate(plan));
 
   const risks = validator.responded ? parseRisks(validator.text) : [];
@@ -202,7 +232,8 @@ export async function runValidate({ plan, manifest, callModel, factcheck = false
       revalidatorPromptValidate(plan, risks.map((r) => `RISK: ${r}`).join("\n")));
     tiers.push(revalidator);
   } else {
-    tiers.push({ role: byRole(manifest, "revalidator").role, model: byRole(manifest, "revalidator").model,
+    const rev = byRole(manifest, "revalidator");
+    tiers.push({ role: rev.role, model: rev.model, via: rev.via ?? "proxy",
       responded: false, optionalSkipped: true, stance: null,
       error: `not escalated (risks=${riskCount} < threshold=${threshold}, uncertain=${uncertain})` });
   }
@@ -215,6 +246,7 @@ export async function runValidate({ plan, manifest, callModel, factcheck = false
       tiers.push(fc);
     } else {
       tiers.push({ role: manifest.factcheck.role, model: manifest.factcheck.model,
+        via: manifest.factcheck.via ?? "proxy",
         responded: false, optionalSkipped: true, stance: null,
         error: "fact-check not invoked (consent not given)" });
     }

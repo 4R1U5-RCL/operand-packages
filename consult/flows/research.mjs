@@ -136,31 +136,55 @@ async function run(opts) {
   if (!sg.ok) return r.set("unknown", { evidence: sg.note,
     message: "research self-guard could not be exercised — verdict not trustworthy" });
 
-  let callModel, question;
+  let callModel, question, baseAnswer = null;
   if (opts.fixtures) {
     callModel = makeFixtureCallModel(resolvePath(opts.fixtures), m);
     question = opts.question || "(offline fixture scenario)";
   } else {
     callModel = makeProxyCallModel();
     question = opts.question;
+    baseAnswer = opts.baseAnswer ?? null;
     if (!question) return r.set("unknown", { evidence: "no --question and no --fixtures",
       message: "research: nothing to run" });
   }
 
-  const v = await runResearch({ question, manifest: m, callModel, factcheck: opts.factcheck });
+  const v = await runResearch({ question, manifest: m, callModel, baseAnswer, factcheck: opts.factcheck });
   r.chain(v);
 
   if (opts.report) { try { writeFileSync(opts.report, renderReport(v)); } catch { /* non-fatal */ } }
 
-  if (v.verdict === "unknown") return r.set("unknown", {
-    evidence: `a tier could not be reached/parsed; ${v.downgrade_note || ""}`,
-    message: "research: chain incomplete — verdict unknown (never a fabricated cross-validated answer)" });
+  if (v.verdict === "unknown") {
+    // The base answer comes from the calling agent (Claude IS the base tier).
+    // A live run with no --base-answer falls back to the base MODEL, which the
+    // proxy does not serve — say so plainly rather than a generic "tier" message.
+    const base = (v.tiers || []).find((t) => t.role === "base");
+    if (!opts.fixtures && !baseAnswer && (!base || !base.responded)) return r.set("unknown", {
+      evidence: `no base answer supplied and base model not reachable; ${v.downgrade_note || ""}`,
+      message: "no base answer supplied and base model not reachable — the calling agent must supply its own answer via --base-answer" });
+    return r.set("unknown", {
+      evidence: `a tier could not be reached/parsed; ${v.downgrade_note || ""}`,
+      message: "research: chain incomplete — verdict unknown (never a fabricated cross-validated answer)" });
+  }
   return r.set("pass", {
     evidence: `chain ran as specified; confidence=${v.confidence} (inter-model agreement, NOT correctness). ${sg.note}`,
     message: `research: ${v.verdict} — confidence ${v.confidence}` });
 }
 
 function flag(argv, name) { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; }
+
+// The base answer is the CALLING AGENT'S own answer (Claude is the base tier, as
+// in the original /research skill). Accept it inline (--base-answer), from a file
+// (--base-answer-file), or piped on stdin. undefined => none supplied.
+function resolveBaseAnswer(argv) {
+  const direct = flag(argv, "--base-answer");
+  if (direct != null) return direct;
+  const file = flag(argv, "--base-answer-file");
+  if (file) { try { return readFileSync(file, "utf8"); } catch { return undefined; } }
+  if (!process.stdin.isTTY) {
+    try { const s = readFileSync(0, "utf8"); if (s && s.trim() !== "") return s; } catch { /* no stdin */ }
+  }
+  return undefined;
+}
 
 async function main(argv) {
   if (argv.includes("--self-test")) {
@@ -169,6 +193,7 @@ async function main(argv) {
   const opts = {
     fixtures: flag(argv, "--fixtures"),
     question: flag(argv, "--question"),
+    baseAnswer: resolveBaseAnswer(argv),
     factcheck: argv.includes("--factcheck"),
     report: flag(argv, "--report"),
   };

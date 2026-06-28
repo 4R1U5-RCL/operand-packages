@@ -2,11 +2,11 @@
   "flow": "research",
   "purpose": "Answer a question through the model chain, then label confidence from inter-model agreement.",
   "tiers": [
-    { "role": "base",        "model": "claude-opus-4-8",  "purpose": "answer" },
-    { "role": "validator",   "model": "gpt-5",            "purpose": "validate the base answer" },
-    { "role": "revalidator", "model": "gemini-2.5-pro",   "purpose": "re-validate independently" }
+    { "role": "base",        "model": "claude-opus-4-8",  "via": "agent", "purpose": "answer (supplied by the calling agent — Claude IS the base tier; no proxy call)" },
+    { "role": "validator",   "model": "gpt-5",            "via": "proxy", "purpose": "validate the base answer" },
+    { "role": "revalidator", "model": "gemini-2.5-pro",   "via": "proxy", "purpose": "re-validate independently" }
   ],
-  "factcheck": { "role": "factcheck", "model": "perplexity/sonar", "purpose": "optional web fact-check", "optional": true, "requires_consent": true },
+  "factcheck": { "role": "factcheck", "model": "perplexity-sonar", "via": "proxy", "purpose": "optional web fact-check", "optional": true, "requires_consent": true },
   "confidence": {
     "min_corroborating_responders_for_high": 2,
     "rule": "HIGH = both corroborating tiers responded AND concur; LOW = any responding tier dissents (both positions surfaced); MEDIUM = partial corroboration. Confidence is INTER-MODEL AGREEMENT, never a claim of correctness."
