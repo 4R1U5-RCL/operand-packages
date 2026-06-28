@@ -1,0 +1,24 @@
+{
+  "name": "@studio/notify",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Studio-internal OUTBOUND notification seam. Pushes a Telegram alert (via the studio's hosted [STUDIO-NOTIFICATION] n8n workflow) when a Claude Code session needs attention or finishes, and offers the same signed seam to other callers (e.g. ~/packages/audit). Studio OPS infra — NOT a client-template package: never enters a client repo, not tier-gated.",
+  "exports": {
+    ".": "./src/client.mjs",
+    "./client": "./src/client.mjs"
+  },
+  "bin": {
+    "studio-notify": "./bin/notify.mjs"
+  },
+  "scripts": {
+    "selftest": "node scripts/selftest.mjs",
+    "provision": "node scripts/provision-n8n.mjs",
+    "earned-pass": "node scripts/earned-pass.mjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "hooks"
+  ]
+}
