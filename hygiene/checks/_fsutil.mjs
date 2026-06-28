@@ -58,6 +58,115 @@ export function mergeExclude(...lists) {
   return out;
 }
 
+// ── profiles ────────────────────────────────────────────────────────────────
+// A profile (profiles/<name>.json) declares the cleanup semantics + backup policy
+// for one ENVIRONMENT (claude / codebase / llm-artifacts). The control scripts
+// dispatch on profile.cleanup.mode and profile.backup.engine. Default is `claude`
+// (full back-compat with v0.2.1).
+export function loadProfile(pkgDir, name) {
+  const file = join(pkgDir, "profiles", `${name}.json`);
+  return JSON.parse(readFileSync(file, "utf8"));
+}
+
+// Resolve the exclude set for ONE operation block (cleanup or backup of a
+// profile). Honours its `use_shared_exclude` flag — claude/backup opt INTO the
+// shared vendored/cache set; llm-artifacts opts OUT (it must look inside `cache`
+// to find a misplaced valuable artifact). Then merges the op's own `exclude`.
+export function resolveExclude(pkgDir, opBlock) {
+  const shared = opBlock?.use_shared_exclude ? sharedExclude(pkgDir) : [];
+  return mergeExclude(shared, opBlock?.exclude || []);
+}
+
+// ── git (codebase profile) ────────────────────────────────────────────────────
+// Ignore resolution is DELEGATED to git rather than reimplemented — git is the
+// authority on what .gitignore excludes. A non-repo target is reported `unknown`
+// by the caller (never a false pass).
+export function isGitRepo(target) {
+  const r = spawnSync("git", ["-C", target, "rev-parse", "--is-inside-work-tree"],
+                      { encoding: "utf8", maxBuffer: MAXBUF });
+  return !r.error && r.status === 0 && (r.stdout || "").trim() === "true";
+}
+
+// Run `git -C target ls-files -z <args>` and return POSIX rel paths (sorted,
+// deduped). NUL-delimited (-z) so paths with spaces / unicode / newlines come
+// through EXACTLY and unquoted — they then match walkTree's rel paths and tar's
+// --null -T list without a quoting round-trip.
+export function gitLsFiles(target, args) {
+  const r = spawnSync("git", ["-C", target, "ls-files", "-z", ...args],
+                      { encoding: "utf8", maxBuffer: MAXBUF });
+  if (r.error || r.status !== 0) {
+    return { ok: false, files: [], error: (r.stderr || r.error?.message || "").trim() };
+  }
+  const files = [...new Set((r.stdout || "").split("\0").filter(Boolean))].sort();
+  return { ok: true, files };
+}
+
+// The authoritative backup set for a git repo: tracked + untracked-but-not-ignored
+// (exactly what git would carry, minus what .gitignore excludes). git lists a
+// NESTED repo / worktree it won't descend into as an opaque DIRECTORY entry (a
+// trailing-slash path) — those are separate repositories, not this repo's files,
+// so they are dropped (and counted) rather than folded into the parent's backup.
+export function gitBackupSet(target) {
+  const r = gitLsFiles(target, ["--cached", "--others", "--exclude-standard"]);
+  if (!r.ok) return r;
+  const files = r.files.filter((f) => !f.endsWith("/"));
+  return { ok: true, files, nestedSkipped: r.files.length - files.length };
+}
+
+// Build outPath = a .tar.gz of an EXPLICIT relative-file list under srcDir (used
+// by the codebase backup so the archived set is precisely git's file list — no
+// exclude-glob round-trip, so expected == archived by construction). Returns
+// { ok, error }. An empty list is an error (nothing to archive).
+export function createArchiveFromList(srcDir, outPath, relFiles) {
+  if (!relFiles || relFiles.length === 0) return { ok: false, error: "empty file list" };
+  // NUL-delimited list (--null) so any path (spaces/unicode/newlines) is exact.
+  const listFile = join(mkTmpDir("hygiene-list-"), "files.nul");
+  writeFileSync(listFile, relFiles.join("\0") + "\0");
+  const r = spawnSync("tar", ["-czf", outPath, "-C", srcDir, "--no-recursion", "--null", "-T", listFile],
+                      { encoding: "utf8", maxBuffer: MAXBUF });
+  try { rmSync(join(listFile, ".."), { recursive: true, force: true }); } catch { /* */ }
+  if (r.error) return { ok: false, error: r.error.message };
+  if (r.status !== 0) return { ok: false, error: (r.stderr || "").trim() || `tar exit ${r.status}` };
+  return { ok: true };
+}
+
+// Does any path component of `rel` match one of `names` (e.g. is the file inside a
+// `cache`/`blobs` directory)? Used by the llm-artifacts placement detector.
+export function pathHasComponent(rel, names) {
+  const set = new Set(names);
+  return rel.split("/").slice(0, -1).some((c) => set.has(c));
+}
+
+// git init / add — used ONLY by the codebase self-guard, which stages a throwaway
+// copy of a fixture into a real git repo so the SAME git-authoritative detector
+// path that judges a real repo is exercised offline. `add` stages without a
+// commit (no git identity needed); `git ls-files` then reports staged files as
+// tracked. files === "-A" stages everything not gitignored.
+export function gitInit(dir) {
+  const r = spawnSync("git", ["-C", dir, "init", "-q"], { encoding: "utf8", maxBuffer: MAXBUF });
+  return !r.error && r.status === 0;
+}
+
+export function gitAdd(dir, files) {
+  const args = files === "-A" ? ["-C", dir, "add", "-A"] : ["-C", dir, "add", "--", ...files];
+  const r = spawnSync("git", args, { encoding: "utf8", maxBuffer: MAXBUF });
+  return !r.error && r.status === 0;
+}
+
+// Stage a codebase fixture into a throwaway git repo. The fixture ships its ignore
+// file as `gitignore` (no dot) so the package repo's own git does not ignore the
+// fixture's deliberately-ignored files (app.log, dist/out.js) — they MUST be present
+// in a fresh clone for the "don't flag correctly-ignored junk" guard to mean
+// anything. Here we copy the fixture, rename gitignore -> .gitignore, and git init,
+// so the SAME git-authoritative detector path runs offline. Returns the staging path.
+export function stageGitFixture(srcDir, prefix) {
+  const dir = stageCopy(srcDir, prefix);
+  const gi = join(dir, "gitignore");
+  if (existsSync(gi)) renameSync(gi, join(dir, ".gitignore"));
+  gitInit(dir);
+  return dir;
+}
+
 // ── tree walk ─────────────────────────────────────────────────────────────────
 // Returns entries { rel, full } with POSIX-style `rel` (forward slashes, no
 // leading "./"). Counts regular files AND symlinks — tar archives symlinks as

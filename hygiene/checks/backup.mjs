@@ -1,243 +1,222 @@
 #!/usr/bin/env node
 // backup.mjs — CONTROL: backup   SURFACE: local
 //
-// A PRESERVATION action that self-verifies. It creates a .tar.gz of the target
-// config tree (+ a .sha256 and a manifest of entries) and only declares `pass`
-// when the archive was created AND VERIFIED: its sha256 is stable across re-reads,
-// it is extractable, and every in-scope file is present in the entry listing
-// (proving the archive captured the tree, not an empty/partial tar).
+// A PRESERVATION action that self-verifies, across THREE profiles (--profile,
+// default `claude`). It only declares `pass` when the archive was created AND
+// VERIFIED: sha256 stable across re-reads, extractable, and EVERY in-scope file
+// present in the entry listing (proving the tree was captured, not an empty tar).
 //
-//   pass     archive created AND verified (stable sha256, extractable, tree captured)
-//   fail     an archive was produced but did NOT verify (missed files / not stable
-//            / not extractable) — a real finding
-//   unknown  could not run — target unreadable/empty, tar/sha tooling failed
+// Two engines, dispatched on profile.backup.engine:
+//   exclude  (claude, llm-artifacts) — tar the whole target minus an exclude set
+//            applied IDENTICALLY to the expected-file walk AND to tar (the v0.2.1
+//            invariant: expected == archived).
+//   git      (codebase) — the archived set is EXACTLY `git ls-files --cached
+//            --others --exclude-standard` (tracked + untracked-not-ignored), minus
+//            the backup exclude, fed to `tar -T`. git is the .gitignore authority,
+//            so the set respects .gitignore exactly and expected == archived by
+//            construction. A non-repo target => unknown.
 //
-// DRY-RUN BY DEFAULT (matching the original /backup skill): a run with no --apply
-// builds & verifies a throwaway archive in a temp dir and reports the capability,
-// writing NOTHING into the target. `--apply` writes the real archive into the
-// target's backups dir, RE-VERIFIES it from disk, and then prints the off-system
-// copy reminder — the human-gated P2 step.
+//   pass / fail / unknown  as in cleanup; fail = an archive was produced but did
+//   not verify; unknown = target unreadable/empty, tooling missing, or (git engine)
+//   not a git repo.
 //
-// SELF-GUARD FIRST (WORKING_METHOD §7/§8) — and the negative control is the soul
-// of this control: "an archive that misses a known file is caught." The self-test
-// stages a temp copy of fixtures/backup/tree, injects a SENTINEL file, then:
-//   - POSITIVE: archives the staging tree and confirms the verifier passes it
-//     (sentinel present, sha256 stable, extractable),
-//   - NEGATIVE: builds an archive that DELIBERATELY OMITS the sentinel and
-//     confirms the verifier CATCHES the miss (fires).
-// The sentinel is only ever written into the temp staging copy — NEVER the real
-// target. If the negative control does not fire the verifier is broken: `unknown`,
-// never a pass (_common.mjs enforces this structurally).
+// DRY-RUN BY DEFAULT: no --apply builds & verifies a throwaway archive in a temp
+// dir and writes NOTHING to the target. --apply writes the real archive into the
+// target's backup dir, RE-VERIFIES from disk, then prints the off-system-copy P2
+// reminder.
 //
-// Run:  node backup.mjs --target /path/to/tree            # dry-run: build+verify in temp
-//       node backup.mjs --target /path/to/tree --apply    # WRITE the real archive
-//       node backup.mjs --self-test                        # prove the verifier works
+// SELF-GUARD FIRST: the negative control is "an archive that misses a known file
+// is caught." A sentinel is staged into a throwaway copy; the verifier must pass
+// the positive archive and CATCH a negative archive that omits the sentinel. The
+// git engine stages into a real git repo so the SAME git-authoritative path runs.
+//
+// Run:  node backup.mjs --target DIR [--profile claude|codebase|llm-artifacts]
+//       node backup.mjs --target DIR --apply [--profile ...]   # WRITE the archive
+//       node backup.mjs --self-test [--profile ...]            # prove the verifier
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Result, emitResult } from "./_common.mjs";
 import {
-  walkTree, createArchive, verifyArchive, listEntries, sha256File,
-  stageCopy, injectSentinel, mkTmpDir, SENTINEL_NAME,
-  sharedExclude, mergeExclude,
+  walkTree, createArchive, createArchiveFromList, verifyArchive, listEntries, sha256File,
+  stageCopy, stageGitFixture, injectSentinel, mkTmpDir, loadProfile, resolveExclude, isExcluded,
+  isGitRepo, gitBackupSet, gitAdd,
 } from "./_fsutil.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
-const MANIFEST = join(PKG, "manifests", "backup.json");
-const FIX_TREE = join(PKG, "fixtures", "backup", "tree");
+const FIX = (...p) => join(PKG, "fixtures", ...p);
 
 const CONTROL = "backup";
 const SURFACE = "local";
-const TITLE = "self-verifying config-tree backup";
 
-function loadManifest() {
-  return JSON.parse(readFileSync(MANIFEST, "utf8"));
+// Which fixture tree each profile's self-guard exercises.
+const FIXTURE = {
+  claude: FIX("backup", "tree"),
+  "llm-artifacts": FIX("llm-artifacts", "good"),
+  codebase: FIX("codebase", "good"),
+};
+
+// ── the expected-set + archive builders, per engine ──────────────────────────
+// Both return { ok, expected, build(outPath, omit) , reason }. `build` writes an
+// archive of the expected set to outPath; if `omit` is set, that one path is left
+// out (the negative control). expected is the list verifyArchive checks against.
+
+function excludeEngine(target, cfg) {
+  const exclude = resolveExclude(PKG, cfg);
+  const expected = walkTree(target, { exclude }).map((e) => e.rel);
+  return {
+    ok: expected.length > 0,
+    expected,
+    reason: expected.length ? "" : `0 in-scope files after excludes`,
+    build: (outPath, omit) => createArchive(target, outPath, omit ? [...exclude, omit] : exclude),
+  };
 }
 
-// The one exclude set: shared vendored/cache/non-IOPHON dirs (manifests/
-// _exclude.json) merged with backup-specific excludes (prior archives, secrets).
-// Applied IDENTICALLY to the expected-file walk and to tar — the invariant that
-// makes expected == archived on a real tree.
-function loadExclude(m) {
-  return mergeExclude(sharedExclude(PKG), m.exclude || []);
+function gitEngine(target, cfg) {
+  if (!isGitRepo(target)) return { ok: false, expected: [], reason: `not a git working tree`, gitMissing: true };
+  const exclude = resolveExclude(PKG, cfg);
+  const set = gitBackupSet(target);
+  if (!set.ok) return { ok: false, expected: [], reason: `git ls-files failed: ${set.error}` };
+  // Filter git's set by the backup exclude (drops *.tar.gz, the output dir, etc.)
+  // so the archive never swallows prior backups. isExcluded mirrors tar's pruning.
+  const expected = set.files.filter((rel) => !isExcluded(rel, exclude));
+  return {
+    ok: expected.length > 0,
+    expected,
+    nestedSkipped: set.nestedSkipped || 0,
+    reason: expected.length ? "" : `git set empty after excludes`,
+    // tar EXACTLY the (optionally-trimmed) list → archived == expected by construction.
+    build: (outPath, omit) => createArchiveFromList(target, outPath, omit ? expected.filter((f) => f !== omit) : expected),
+  };
 }
 
-// Returns { ok, injected, fired, note }. ok=false => verifier is broken.
-function selfGuard() {
-  const m = loadManifest();
-  const exclude = loadExclude(m).filter((e) => e !== "data/backups"); // fixture has none anyway
+function engineFor(target, cfg) {
+  return cfg.engine === "git" ? gitEngine(target, cfg) : excludeEngine(target, cfg);
+}
+
+// ── self-guard (engine-agnostic, uses a staged copy + sentinel) ───────────────
+function selfGuard(profile) {
+  const cfg = profile.backup;
+  const fixture = FIXTURE[profile.profile];
   let stage, posDir, negDir;
   try {
-    stage = stageCopy(FIX_TREE, "hygiene-bkp-stage-");
-    injectSentinel(stage, m.sentinel_name);
-    const expected = walkTree(stage, { exclude }).map((e) => e.rel);
-    if (!expected.includes(m.sentinel_name)) {
-      return { ok: false, injected: false, fired: false,
-               note: "self-guard FAILED: sentinel not in staged expected set" };
-    }
-    posDir = mkTmpDir("hygiene-bkp-pos-");
-    negDir = mkTmpDir("hygiene-bkp-neg-");
+    // git engine: stage into a real repo (renames the fixture's gitignore -> .gitignore)
+    // so the SAME git-authoritative file-set path runs; then track the sentinel too.
+    stage = cfg.engine === "git" ? stageGitFixture(fixture, "hygiene-bkp-stage-") : stageCopy(fixture, "hygiene-bkp-stage-");
+    injectSentinel(stage, cfg.sentinel_name);
+    if (cfg.engine === "git") gitAdd(stage, "-A"); // sentinel is now tracked
+
+    const eng = engineFor(stage, cfg);
+    if (!eng.ok) return { ok: false, injected: false, fired: false, note: `self-guard FAILED: staged fixture yielded no expected set (${eng.reason})` };
+    if (!eng.expected.includes(cfg.sentinel_name)) return { ok: false, injected: false, fired: false, note: `self-guard FAILED: sentinel '${cfg.sentinel_name}' not in expected set (${eng.expected.length} files)` };
+
+    posDir = mkTmpDir("hygiene-bkp-pos-"); negDir = mkTmpDir("hygiene-bkp-neg-");
     const posPath = join(posDir, "good.tar.gz");
     const negPath = join(negDir, "missing.tar.gz");
 
-    // POSITIVE: archive everything (sentinel included) — verifier should pass.
-    const cPos = createArchive(stage, posPath, exclude);
-    if (!cPos.ok) {
-      return { ok: false, injected: false, fired: false,
-               note: `self-guard FAILED: could not build positive archive (tar): ${cPos.error}` };
-    }
-    const vPos = verifyArchive(posPath, expected);
+    const cPos = eng.build(posPath, null);
+    if (!cPos.ok) return { ok: false, injected: false, fired: false, note: `self-guard FAILED: could not build positive archive: ${cPos.error}` };
+    const vPos = verifyArchive(posPath, eng.expected);
 
-    // NEGATIVE: archive WITHOUT the sentinel — the verifier (still expecting it)
-    // must catch the miss. This is the "archive that misses a known file" control.
-    const cNeg = createArchive(stage, negPath, [...exclude, m.sentinel_name]);
-    if (!cNeg.ok) {
-      return { ok: false, injected: false, fired: false,
-               note: `self-guard FAILED: could not build negative archive (tar): ${cNeg.error}` };
-    }
+    const cNeg = eng.build(negPath, cfg.sentinel_name);
+    if (!cNeg.ok) return { ok: false, injected: false, fired: false, note: `self-guard FAILED: could not build negative archive: ${cNeg.error}` };
     const negList = listEntries(negPath);
-    const injected = negList.ok && !negList.entries.includes(m.sentinel_name); // bad input provably present
-    const vNeg = verifyArchive(negPath, expected);
-    const fired = vNeg.ok === false && (vNeg.missing || []).includes(m.sentinel_name); // caught the miss
+    const injected = negList.ok && !negList.entries.includes(cfg.sentinel_name);
+    const vNeg = verifyArchive(negPath, eng.expected);
+    const fired = vNeg.ok === false && (vNeg.missing || []).includes(cfg.sentinel_name);
 
     const ok = vPos.ok && injected && fired;
     return {
       ok, injected, fired,
       note: ok
-        ? `self-guard OK: positive archive verified (${vPos.entries} entries, sha ${vPos.sha256.slice(0, 12)}…, ` +
-          `extractable, stable); negative archive omitting '${m.sentinel_name}' was CAUGHT (${vNeg.reason})`
+        ? `self-guard OK: positive archive verified (${vPos.entries} entries, sha ${vPos.sha256.slice(0, 12)}…, extractable, stable); negative archive omitting '${cfg.sentinel_name}' was CAUGHT (${vNeg.reason})`
         : `self-guard FAILED: positive=${vPos.reason}; negative injected=${injected} fired=${fired} (${vNeg.reason})`,
     };
   } catch (e) {
     return { ok: false, injected: false, fired: false, note: `self-guard error: ${e.message}` };
   } finally {
-    for (const d of [stage, posDir, negDir]) {
-      try { if (d) rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ }
-    }
+    for (const d of [stage, posDir, negDir]) { try { if (d) rmSync(d, { recursive: true, force: true }); } catch { /* */ } }
   }
 }
 
 function tsName(prefix) {
-  return prefix + new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "Z") + ".tar.gz";
+  return prefix + new Date().toISOString().replace(/[:.]/g, "-") + ".tar.gz";
 }
 
-function dryRun(target) {
-  const r = new Result(CONTROL, SURFACE, TITLE);
-  const sg = selfGuard();
+function dryRun(profile, target) {
+  const cfg = profile.backup;
+  const r = new Result(CONTROL, SURFACE, `${cfg.title} [profile: ${profile.profile}]`);
+  const sg = selfGuard(profile);
   r.negativeControl({ injected: sg.injected, fired: sg.fired, note: sg.note });
-  if (!sg.ok) {
-    return r.set("unknown", { evidence: sg.note,
-      message: "backup verifier self-guard failed — verdict not trustworthy" });
-  }
+  if (!sg.ok) return r.set("unknown", { evidence: sg.note, message: `backup verifier self-guard failed (${profile.profile}) — verdict not trustworthy` });
 
-  const m = loadManifest();
-  const exclude = loadExclude(m);
-  const expected = walkTree(target, { exclude }).map((e) => e.rel);
-  if (expected.length === 0) {
-    return r.set("unknown", {
-      evidence: `target ${target} has 0 in-scope files (after excludes) — nothing to back up or unreadable`,
-      message: "backup: nothing to archive at target (unverifiable)" });
-  }
+  const eng = engineFor(target, cfg);
+  if (eng.gitMissing) return r.set("unknown", { evidence: `${eng.reason}: ${target} — the codebase profile delegates ignore resolution to git; point it at a repo`, message: "backup: codebase profile needs a git working tree (unverifiable)" });
+  if (!eng.ok) return r.set("unknown", { evidence: `target ${target}: ${eng.reason} — nothing to back up or unreadable`, message: "backup: nothing to archive at target (unverifiable)" });
 
   const outDir = mkTmpDir("hygiene-bkp-dry-");
   const outPath = join(outDir, "dryrun.tar.gz");
   try {
-    const c = createArchive(target, outPath, exclude);
-    if (!c.ok) {
-      return r.set("unknown", { evidence: `tar could not build a trial archive: ${c.error}`,
-        message: "backup: archive tooling failed (unverifiable)" });
-    }
-    const v = verifyArchive(outPath, expected);
-    r.detail({ mode: "dry-run", would_write_to: m.output_dir, expected_files: expected.length,
-               archive_entries: v.entries, sha256: v.sha256, stable: v.stable,
-               extractable: v.extractable, missing: v.missing });
-    if (!v.ok) {
-      return r.set("fail", {
-        evidence: `trial archive of ${target} did NOT verify: ${v.reason}`,
-        message: "backup: archive failed verification (would not be a safe backup)" });
-    }
-    return r.set("pass", {
-      evidence: `trial archive verified: ${v.entries} entries capture all ${expected.length} in-scope ` +
-                `file(s), sha256 stable (${v.sha256.slice(0, 12)}…), extractable. DRY-RUN — nothing written. ` +
-                `Re-run with --apply to write into ${m.output_dir}. ${sg.note}`,
-      message: "backup: archive builds and verifies (dry-run; --apply to write)" });
+    const c = eng.build(outPath, null);
+    if (!c.ok) return r.set("unknown", { evidence: `tar could not build a trial archive: ${c.error}`, message: "backup: archive tooling failed (unverifiable)" });
+    const v = verifyArchive(outPath, eng.expected);
+    r.detail({ mode: "dry-run", engine: cfg.engine, would_write_to: cfg.output_dir, expected_files: eng.expected.length, archive_entries: v.entries, nested_skipped: eng.nestedSkipped || 0, sha256: v.sha256, stable: v.stable, extractable: v.extractable, missing: v.missing });
+    if (!v.ok) return r.set("fail", { evidence: `trial archive of ${target} did NOT verify: ${v.reason}`, message: "backup: archive failed verification (would not be a safe backup)" });
+    return r.set("pass", { evidence: `trial archive verified: ${v.entries} entries capture all ${eng.expected.length} in-scope file(s), sha256 stable (${v.sha256.slice(0, 12)}…), extractable. DRY-RUN — nothing written. --apply to write into ${cfg.output_dir}.`, message: "backup: archive builds and verifies (dry-run; --apply to write)" });
   } finally {
     try { rmSync(outDir, { recursive: true, force: true }); } catch { /* */ }
   }
 }
 
-function apply(target) {
-  const r = new Result(CONTROL, SURFACE, TITLE);
-  const sg = selfGuard();
+function apply(profile, target) {
+  const cfg = profile.backup;
+  const r = new Result(CONTROL, SURFACE, `${cfg.title} [profile: ${profile.profile}]`);
+  const sg = selfGuard(profile);
   r.negativeControl({ injected: sg.injected, fired: sg.fired, note: sg.note });
-  if (!sg.ok) {
-    return r.set("unknown", { evidence: sg.note,
-      message: "backup verifier self-guard failed — refusing to declare a verified backup" });
-  }
+  if (!sg.ok) return r.set("unknown", { evidence: sg.note, message: `backup verifier self-guard failed (${profile.profile}) — refusing to declare a verified backup` });
 
-  const m = loadManifest();
-  const exclude = loadExclude(m);
-  const expected = walkTree(target, { exclude }).map((e) => e.rel);
-  if (expected.length === 0) {
-    return r.set("unknown", {
-      evidence: `target ${target} has 0 in-scope files (after excludes) — nothing to back up or unreadable`,
-      message: "backup: nothing to archive at target (unverifiable)" });
-  }
+  const eng = engineFor(target, cfg);
+  if (eng.gitMissing) return r.set("unknown", { evidence: `${eng.reason}: ${target}`, message: "backup: codebase profile needs a git working tree (unverifiable)" });
+  if (!eng.ok) return r.set("unknown", { evidence: `target ${target}: ${eng.reason}`, message: "backup: nothing to archive at target (unverifiable)" });
 
-  const outDir = join(target, m.output_dir);
+  const outDir = join(target, cfg.output_dir);
   mkdirSync(outDir, { recursive: true });
-  const archivePath = join(outDir, tsName(m.archive_prefix));
+  const archivePath = join(outDir, tsName(cfg.archive_prefix));
 
-  const c = createArchive(target, archivePath, exclude);
-  if (!c.ok) {
-    return r.set("unknown", { evidence: `tar could not write the archive: ${c.error}`,
-      message: "backup --apply: archive tooling failed (no backup written)" });
-  }
+  const c = eng.build(archivePath, null);
+  if (!c.ok) return r.set("unknown", { evidence: `tar could not write the archive: ${c.error}`, message: "backup --apply: archive tooling failed (no backup written)" });
 
-  // Re-verify the on-disk archive AFTER writing, before declaring success.
-  const v = verifyArchive(archivePath, expected);
+  const v = verifyArchive(archivePath, eng.expected);
   const sha = sha256File(archivePath);
   writeFileSync(archivePath + ".sha256", `${sha}  ${archivePath.split("/").pop()}\n`);
   const listed = listEntries(archivePath);
   writeFileSync(archivePath + ".manifest.txt", (listed.entries || []).join("\n") + "\n");
+  r.detail({ mode: "apply", engine: cfg.engine, archive: archivePath, sha256: sha, expected_files: eng.expected.length, archive_entries: v.entries, nested_skipped: eng.nestedSkipped || 0, stable: v.stable, extractable: v.extractable, missing: v.missing });
 
-  r.detail({ mode: "apply", archive: archivePath, sha256: sha, expected_files: expected.length,
-             archive_entries: v.entries, stable: v.stable, extractable: v.extractable, missing: v.missing });
+  if (!v.ok) return r.set("fail", { evidence: `wrote ${archivePath} but RE-VERIFY failed: ${v.reason} — do not trust this archive`, message: "backup --apply: written archive did not verify (NOT a safe backup)" });
 
-  if (!v.ok) {
-    return r.set("fail", {
-      evidence: `wrote ${archivePath} but RE-VERIFY failed: ${v.reason} — do not trust this archive`,
-      message: "backup --apply: written archive did not verify (NOT a safe backup)" });
-  }
-
-  // Off-system copy reminder (the human-gated P2 step). Printed to stderr so it
-  // never contaminates the machine JSON on stdout.
-  process.stderr.write(
-    `\n  [backup] wrote & verified ${archivePath}\n` +
-    `  [backup] sha256: ${sha}\n` +
-    `  [backup] P2 (human): copy this archive OFF-SYSTEM (it is not a backup until it ` +
-    `lives somewhere this host can fail without taking it down).\n\n`);
-
-  return r.set("pass", {
-    evidence: `wrote ${archivePath} (+ .sha256, .manifest.txt) and RE-VERIFIED from disk: ` +
-              `${v.entries} entries capture all ${expected.length} in-scope file(s), sha256 stable, ` +
-              `extractable. Off-system copy reminder printed. ${sg.note}`,
-    message: "backup --apply: archive written and verified (remember the off-system copy)" });
+  process.stderr.write(`\n  [backup] wrote & verified ${archivePath}\n  [backup] sha256: ${sha}\n  [backup] P2 (human): copy this archive OFF-SYSTEM (it is not a backup until it lives somewhere this host can fail without taking it down).\n\n`);
+  return r.set("pass", { evidence: `wrote ${archivePath} (+ .sha256, .manifest.txt) and RE-VERIFIED from disk: ${v.entries} entries capture all ${eng.expected.length} in-scope file(s), sha256 stable, extractable. Off-system copy reminder printed.`, message: "backup --apply: archive written and verified (remember the off-system copy)" });
 }
 
 function main(argv) {
-  const i = argv.indexOf("--target");
-  const target = i >= 0 ? argv[i + 1] : process.cwd();
+  const ti = argv.indexOf("--target");
+  const target = ti >= 0 ? argv[ti + 1] : process.cwd();
+  const pi = argv.indexOf("--profile");
+  const profileName = pi >= 0 ? argv[pi + 1] : "claude";
+  let profile;
+  try { profile = loadProfile(PKG, profileName); }
+  catch (e) { console.log(JSON.stringify({ control: CONTROL, status: "unknown", evidence: `unknown profile '${profileName}': ${e.message}`, negative_control: { injected: false, fired: false, note: "" }, details: {} })); return 2; }
+
   if (argv.includes("--self-test")) {
-    const sg = selfGuard();
-    console.log(JSON.stringify({ control: CONTROL, self_guard_ok: sg.ok,
-      injected: sg.injected, fired: sg.fired, note: sg.note }));
+    const sg = selfGuard(profile);
+    console.log(JSON.stringify({ control: CONTROL, profile: profileName, self_guard_ok: sg.ok, injected: sg.injected, fired: sg.fired, note: sg.note }));
     return sg.ok ? 0 : 2;
   }
-  if (argv.includes("--apply")) return emitResult(apply(target));
-  return emitResult(dryRun(target));
+  if (argv.includes("--apply")) return emitResult(apply(profile, target));
+  return emitResult(dryRun(profile, target));
 }
 
 process.exit(main(process.argv.slice(2)));

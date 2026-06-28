@@ -1,18 +1,23 @@
 ---
 name: config-hygiene
-description: Tend the IOPHON ~/.claude config tree — take a self-verified backup (archive created AND checked: stable sha256, extractable, tree fully captured) and/or detect layout drift (stray files outside their canonical §2 subdir), with an optional human-gated move-into-place. Every verdict is self-guarded so a green is earned (backup's sentinel negative control fires; cleanup is watched to flag a stray), never assumed. Use when asked to back up ~/.claude, verify a backup, check/tidy config-tree organisation, or report drift. NOT for editing config content, managing secrets, or backing up a deployed app/database — this preserves and tidies a config tree; it does not change what is in it.
+description: Tend a tree via a profile — the IOPHON ~/.claude config tree (claude), a git codebase (codebase), or an LLM-artifact store (llm-artifacts). Take a self-verified backup (archive created AND checked: stable sha256, extractable, tree fully captured) and/or detect drift; under the claude profile drift can be moved into place (human-gated), under codebase/llm-artifacts it is report-only. Every verdict is self-guarded so a green is earned (backup's sentinel negative control fires; cleanup is watched to flag a bad input), never assumed. Use when asked to back up ~/.claude or a repo, verify a backup, check/tidy config-tree organisation, report codebase junk, or find misplaced transcripts. NOT for editing content, managing secrets (see the audit package), or backing up a deployed app/database.
 user-invocable: true
 ---
 
 # config-hygiene
 
 The agent-facing entry point of the `hygiene` package — the on-demand caller for
-the studio's deterministic config-hygiene tooling over the IOPHON home tree
-(default `~/.claude`, overridable with `--target`). The **scheduled** runner
-(`scheduled/`) is the primary, unattended automation; the **CI** gate (`ci/`) is a
-narrow drift check for a version-controlled config tree. You are the on-demand
-one, and the only caller that should ever run a **mutating** action, because only
-you can carry the human confirmation those require.
+the studio's deterministic hygiene tooling, over a tree selected by `--profile`
+(`claude` | `codebase` | `llm-artifacts`, default `claude`; `--target` overrides
+the profile's default path). The **scheduled** runner (`scheduled/`) is the
+primary unattended automation; the **CI** gate (`ci/`) is a narrow drift check.
+You are the on-demand caller, and the only one that should ever run a **mutating**
+action, because only you can carry the human confirmation those require.
+
+**Profiles in one line:** `claude` = the §2 home layout, cleanup RELOCATES strays;
+`codebase` = a git repo, cleanup REPORT-ONLY (git is the ignore authority; needs a
+working tree); `llm-artifacts` = a transcript/cache store, cleanup REPORT-ONLY
+(flags valuable artifacts stranded in a cache). Only `claude` cleanup may `--apply`.
 
 You **call** the deterministic controls in `checks/`. You never re-describe or
 reimplement a control here — one control, one home (`checks/<control>.mjs`), three
@@ -37,52 +42,56 @@ callers. If a control must change, change the script, not this file.
 
 ## How to run
 
-Both controls, dry-run, over the home tree:
+Both controls, dry-run, over the home tree (claude profile, the default):
 
 ```sh
 node <skill-dir>/run.mjs --target ~/.claude
 ```
 
-Run one control:
+Other profiles (note: their cleanup is report-only — see below):
 
 ```sh
-node <skill-dir>/run.mjs --only backup  --target ~/.claude     # dry-run: build + verify in temp
-node <skill-dir>/run.mjs --only cleanup --target ~/.claude     # dry-run: drift report
+node <skill-dir>/run.mjs --profile codebase --target /path/to/repo
+node <skill-dir>/run.mjs --profile llm-artifacts --target ~/.claude/projects
 ```
 
-Prove the detectors still work (no target needed):
+Prove the detectors still work for a profile (no target needed):
 
 ```sh
-node <skill-dir>/run.mjs --self-test
-node <skill-dir>/checks/backup.mjs --self-test
-node <skill-dir>/checks/cleanup.mjs --self-test
+node <skill-dir>/run.mjs --self-test --profile claude
+node <skill-dir>/run.mjs --self-test --profile codebase
+node <skill-dir>/run.mjs --self-test --profile llm-artifacts
 ```
 
 ### The mutating actions — only after explicit human confirm
 
 ```sh
-# Write the real, re-verified archive into <target>/data/backups/ (then prints the
-# off-system-copy reminder — the human-gated P2 step):
+# Write the real, re-verified archive into the profile's backup dir (then prints the
+# off-system-copy reminder — the human-gated P2 step). Works for any profile:
 node <skill-dir>/run.mjs --only backup --apply --target ~/.claude
 
-# Move every stray file to its canonical dir (guarded: refuses to overwrite,
-# verifies each landed). Show the dry-run drift report and get a yes FIRST:
+# Move every stray to its canonical dir — claude profile ONLY (guarded: refuses to
+# overwrite, verifies each landed). Show the dry-run drift report and get a yes FIRST:
 node <skill-dir>/run.mjs --only cleanup --apply --target ~/.claude
 ```
 
-The correct order is always: **dry-run → show the human what would change → on an
-explicit yes, `--apply`.**
+`cleanup --apply` is **rejected** under `codebase`/`llm-artifacts` (report-only —
+it returns `unknown` rather than mutate a codebase or artifact store). The correct
+order is always: **dry-run → show the human what would change → on an explicit
+yes, `--apply`.**
 
 ## What each control does
 
-| Control | Surface | Does | Verdict basis |
+| Control | Profile | Does | Verdict basis |
 |---------|---------|------|---------------|
-| `backup` | local | archives the target tree, then self-verifies | `pass` only if the archive verifies (stable sha256, extractable, every in-scope file present) AND the sentinel negative control fired |
-| `cleanup` | local | scans for stray files vs the canonical §2 layout | `pass` = 0 stray (tidy); `fail` = drift; `--apply` moves strays into place, guarded |
+| `backup` | any | archives the target (claude/llm: walk-minus-excludes; codebase: `git ls-files`), then self-verifies | `pass` only if the archive verifies (stable sha256, extractable, every in-scope file present) AND the sentinel negative control fired |
+| `cleanup` | claude | strays vs the §2 layout; `--apply` MOVES them (guarded) | `pass` = 0 stray; `fail` = drift |
+| `cleanup` | codebase | REPORT-ONLY: tracked or unignored junk (git is the ignore authority; needs a repo) | `pass` = clean; `fail` = committed/unignored junk |
+| `cleanup` | llm-artifacts | REPORT-ONLY: a valuable artifact inside a regenerable cache | `pass` = none misplaced; `fail` = misplaced artifact |
 
-The FIXED scope of each control lives in `manifests/` (cleanup's canonical
-directory rules; backup's include roots + excludes) — not your discretion
-(WORKING_METHOD §1). Read a manifest to see the exact rules.
+The FIXED scope of each profile lives in `profiles/<name>.json` (cleanup mode +
+rules; backup engine + roots/excludes) — not your discretion (WORKING_METHOD §1).
+Read the active profile to see the exact rules.
 
 ## Assembling the report
 
@@ -96,10 +105,11 @@ directory rules; backup's include roots + excludes) — not your discretion
 
 (All in the same directory as this SKILL.md — the `hygiene/` package root.)
 
-- `run.mjs` — the dispatcher you invoke; discovers controls, runs them, aggregates.
+- `run.mjs` — the dispatcher you invoke; runs the controls under a profile, aggregates.
 - `checks/` — the deterministic core; one self-guarding script per control, plus
-  `_common.mjs` (the contract) and `_fsutil.mjs` (walk / classify / tar+sha).
-- `manifests/` — the FIXED scope of each control (cleanup rules; backup roots/excludes).
+  `_common.mjs` (the contract) and `_fsutil.mjs` (walk / classify / tar+sha / git).
+- `profiles/` — the FIXED scope per environment (claude / codebase / llm-artifacts).
+- `manifests/_exclude.json` — the shared vendored/transient exclude set (claude profile).
 - `fixtures/` — the known-good/known-bad trees each control is proven against.
 - `demo.mjs` — the demonstration/smoke-test: proves both controls earn their verdicts.
 - `ci/`, `scheduled/` — the gate and timer wrappers (thin; they call `run.mjs`).

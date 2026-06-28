@@ -1,0 +1,27 @@
+{
+  "profile": "codebase",
+  "title": "a source codebase (git working tree)",
+  "target_default": ".",
+  "describe": "A git-tracked codebase. A codebase has NO canonical 'one home per file kind' layout, so cleanup here is REPORT-ONLY (it never moves or deletes). Ignore resolution is delegated to git itself (git ls-files / check-ignore) rather than a hand-rolled .gitignore matcher — git is the authority on what is ignored, so the backup set and the drift verdict respect .gitignore exactly. REQUIRES a git working tree: a non-repo target returns `unknown`, never a false pass.",
+  "requires_git": true,
+  "cleanup": {
+    "mode": "git-junk",
+    "title": "codebase hygiene drift detector (read-only, git-aware)",
+    "use_shared_exclude": false,
+    "exclude": [".git", "node_modules"],
+    "junk_globs": ["*.tsbuildinfo", "*.log", "*.tmp", "*.swp", "*~", ".DS_Store", "Thumbs.db", "npm-debug.log*", "*.pyc"],
+    "junk_dirs": ["dist", "build", "out", "coverage", ".nyc_output", "__pycache__"],
+    "note": "REPORT ONLY — never moves/deletes. A junk file is drift only if git would carry it: TRACKED junk (committed to the repo) or junk that is present and NOT gitignored (would be committed). Junk that is present but correctly gitignored (e.g. a local dist/) is EXPECTED, not drift. Secret detection deliberately OVERLAPS audit/secret-leak and is NOT reimplemented here — defer to the audit package for committed-secret findings."
+  },
+  "backup": {
+    "engine": "git",
+    "title": "self-verifying codebase backup (git-aware)",
+    "use_shared_exclude": false,
+    "exclude": ["*.tar.gz"],
+    "output_dir": ".hygiene-backups/",
+    "archive_prefix": "codebase_",
+    "sentinel_name": ".hygiene-backup-sentinel",
+    "note": "The archived set is exactly `git ls-files --cached --others --exclude-standard` (tracked + untracked-not-ignored) — git's own authoritative answer to 'what is this repo, minus what .gitignore excludes'. That explicit file list is fed to tar -T, so expected == archived by construction and full .gitignore semantics (negation, anchoring, nested ignores) are honoured for free. .git history itself is NOT archived (it is regenerable from the remote and would dominate the archive)."
+  },
+  "note": "Deliberate deviation from a hand-rolled .gitignore matcher: ignore resolution is delegated to git, the same reasoning by which this package spawns GNU tar instead of encoding tar itself — don't reimplement fragile parsing a trustworthy local tool already does correctly."
+}

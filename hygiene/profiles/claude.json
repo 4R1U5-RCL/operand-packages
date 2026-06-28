@@ -1,0 +1,34 @@
+{
+  "profile": "claude",
+  "title": "IOPHON ~/.claude home tree (§2 canonical layout)",
+  "target_default": "~/.claude",
+  "describe": "The operator's Claude home tree, where each kind of file has exactly one canonical subdirectory. This is the only profile whose cleanup can RELOCATE (it has a canonical home to move strays into); codebase and llm-artifacts have no such home and are report-only.",
+  "cleanup": {
+    "mode": "relocate",
+    "title": "config drift detector (IOPHON ~/.claude §2 layout)",
+    "use_shared_exclude": true,
+    "exclude": [],
+    "rules": [
+      { "id": "audit",     "globs": ["audit_*.md"],     "dest": "data/audits/",    "desc": "audit outputs" },
+      { "id": "handoff",   "globs": ["handoff_*.md"],   "dest": "data/handoffs/",  "desc": "handoff documents" },
+      { "id": "debrief",   "globs": ["debrief_*.md"],   "dest": "data/debriefs/",  "desc": "debrief reports" },
+      { "id": "validate",  "globs": ["validate_*.md"],  "dest": "data/validate/",  "desc": "validation runs" },
+      { "id": "research",  "globs": ["research_*.md"],  "dest": "data/research/",  "desc": "research outputs" },
+      { "id": "archive",   "globs": ["*.tar.gz", "backup_*"], "dest": "data/backups/", "desc": "archives / tarballs" },
+      { "id": "infra-doc", "globs": ["System-Architecture*", "Cyber-Security*", "Current-State*"], "dest": "data/documents/", "desc": "core infrastructure documents" },
+      { "id": "template",  "globs": ["*template*", "*.template"], "dest": "data/templates/", "desc": "reusable document templates" },
+      { "id": "skill",     "globs": ["*.md"], "dest": "commands/", "requires_frontmatter": true, "desc": "skill / slash-command files (only .md carrying skill frontmatter)" }
+    ]
+  },
+  "backup": {
+    "engine": "exclude",
+    "title": "self-verifying config-tree backup",
+    "use_shared_exclude": true,
+    "include_roots": ["."],
+    "exclude": ["data/backups", "*.tar.gz", ".env", ".env.*"],
+    "output_dir": "data/backups/",
+    "archive_prefix": "backup_",
+    "sentinel_name": ".hygiene-backup-sentinel"
+  },
+  "note": "FIXED scope (WORKING_METHOD §1). cleanup rules are ordered specific -> generic; the skill rule additionally requires skill frontmatter so a plain note is never swept. backup excludes prior archives + secrets; the shared vendored/cache set (manifests/_exclude.json) is merged in because use_shared_exclude=true, and applied IDENTICALLY to the expected-file walk and to tar (the invariant that lets verify pass on a real ~/.claude). Behaviour here is unchanged from v0.2.1 — this profile is the back-compat default."
+}

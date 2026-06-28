@@ -1,18 +1,20 @@
-# hygiene — self-verifying backup + config-drift detection for the IOPHON tree
+# hygiene — self-verifying backup + drift detection across three environments
 
-A self-contained, reusable package that **tends** the IOPHON home config tree
-(default `~/.claude`, overridable with `--target`). It folds two operator skills
-into hardened, self-guarded units:
+A self-contained, reusable package that **tends** a tree — the IOPHON home config
+tree, a source codebase, or an LLM-artifact store — via a chosen **profile**
+(`--profile`, default `claude`). It folds two operator skills into hardened,
+self-guarded units:
 
 - **`backup`** — a PRESERVATION action that self-verifies: it creates a `.tar.gz`
   (+ sha256 + a manifest of entries) and only declares `pass` when the archive was
   created *and verified* — its sha256 is stable on re-read, it is extractable, and
   every in-scope file is present in the listing (proving it captured the tree, not
   an empty/partial tar).
-- **`cleanup`** — a DRIFT DETECTOR: it scans the tree for stray files that violate
-  the canonical §2 directory layout (which kind of file belongs in which subdir).
-  `pass` = tidy (zero stray), `fail` = drift, `unknown` = couldn't scan. It also
-  has a human-gated `--apply` mode that MOVES each stray to its canonical dir.
+- **`cleanup`** — a DRIFT DETECTOR. Under the `claude` profile it scans for stray
+  files that violate the canonical §2 layout and can RELOCATE them (`--apply`).
+  Under the `codebase` and `llm-artifacts` profiles it is **report-only** — it
+  flags drift but never moves or deletes. `pass` = clean, `fail` = drift,
+  `unknown` = couldn't scan.
 
 It lives in the reusable-packages monorepo (`4R1U5-RCL/packages`) at `hygiene/`
 and is **consumed by pulling a pinned version**, never copy-forked into a host
@@ -20,45 +22,80 @@ and is **consumed by pulling a pinned version**, never copy-forked into a host
 prevent).
 
 > **The one caveat to carry into every run.** A `pass` means the *action* held —
-> the archive verified, or the tree is tidy by the rules in `manifests/cleanup.json`.
-> It does **not** mean your data is safe or your config is correct. A backup that
-> verifies locally is still not a backup until a copy lives **off this host** (the
+> the archive verified, or the tree is clean by the active profile's rules. It does
+> **not** mean your data is safe or your config is correct. A backup that verifies
+> locally is still not a backup until a copy lives **off this host** (the
 > human-gated P2 step the tool reminds you about but cannot perform). And cleanup
-> only knows the kinds of files it has rules for — it tidies the layout, it does
-> not judge the contents. Every `pass` here is *earned* (watched to fail a
-> deliberately-bad input), never assumed.
+> only knows the drift each profile defines — it does not judge contents. Every
+> `pass` here is *earned* (watched to fail a deliberately-bad input), never assumed.
 
 ---
 
-## Architecture — one package, two controls, every action exactly once
+## Architecture — one package, two controls, three profiles
 
 ```
 hygiene/
 ├── checks/                 the deterministic core (single source of truth)
 │   ├── _common.mjs           the ONE output contract + the structural honest-pass rule
-│   ├── _fsutil.mjs           shared fs helpers: walk a tree, classify a path against
-│   │                         the cleanup rules, tar+gzip (spawns system `tar`), sha256,
-│   │                         archive verify, sentinel injection, guarded move
-│   ├── cleanup.mjs           CONTROL: drift detector (+ guarded --apply mover)
-│   └── backup.mjs            CONTROL: create + self-verify an archive (+ --apply writes it)
-├── manifests/              the FIXED scope of each control (not model discretion)
-│   ├── cleanup.json          canonical directory rules: pattern → dest subdir (§2 layout)
-│   └── backup.json           include roots + exclude globs for the archive
-├── fixtures/               a known-GOOD and known-BAD tree per control
-│   ├── cleanup/good · cleanup/bad     tidy tree vs. a tree with stray files
-│   └── backup/tree                    a small tree the backup self-test archives
-├── run.mjs                 the dispatcher: discover controls, run, aggregate, exit codes
+│   ├── _fsutil.mjs           shared fs helpers: walk/classify a tree, tar+gzip (spawns
+│   │                         system `tar`), sha256, archive verify, sentinel injection,
+│   │                         guarded move, git helpers (codebase profile)
+│   ├── cleanup.mjs           CONTROL: drift detector — dispatches on profile.cleanup.mode
+│   │                         (relocate | git-junk | artifact-placement)
+│   └── backup.mjs            CONTROL: create + self-verify an archive — dispatches on
+│                             profile.backup.engine (exclude | git)
+├── profiles/               the FIXED scope per ENVIRONMENT (not model discretion)
+│   ├── claude.json           ~/.claude §2 layout — cleanup RELOCATES (the only mutating mode)
+│   ├── codebase.json         a git working tree — cleanup REPORT-ONLY; git is the ignore authority
+│   └── llm-artifacts.json    a transcript/output/cache store — cleanup REPORT-ONLY
+├── manifests/
+│   └── _exclude.json         the shared vendored/transient exclude set (claude profile)
+├── fixtures/               a known-GOOD and known-BAD tree per profile
+│   ├── cleanup/{good,bad}             claude: tidy vs. stray files
+│   ├── codebase/{good,bad}            committed/unignored junk vs. correctly-ignored junk
+│   ├── llm-artifacts/{good,bad}       artifacts well-placed vs. a transcript inside a cache
+│   └── backup/tree                    the claude backup self-test tree
+├── run.mjs                 the dispatcher: --profile / --target / --only, aggregate, exit codes
 ├── SKILL.md                agent entry point (on-demand; the only mutating caller)
 ├── ci/                     CI drift gate (a weak fit — see ci/README.md)
 ├── scheduled/              the STRONG automation: timer that backs up + reports drift
-├── demo.mjs                the smoke-test: proves both controls earn their verdicts
+├── demo.mjs                the smoke-test: proves both controls earn their verdicts × all profiles
 └── README.md
 ```
 
-**The cardinal rule:** each control's logic is a script in `checks/` exactly once.
-All three entry points **call** it; none re-describes it as agent-instructions,
-re-inlines it as CI YAML, or re-rolls it in a cron job. One control, one home,
-three callers.
+**The cardinal rule:** each control's logic is a script in `checks/` exactly once;
+a profile only swaps the *scope and semantics*, never the logic's home. All three
+entry points **call** the control; none re-describes it. One control, one home,
+three callers — now over three profiles.
+
+---
+
+## Profiles
+
+`--profile <name>` (default `claude`) selects the environment. The default
+`--target` comes from the profile; override with `--target`.
+
+| Profile | Target | `cleanup` | `backup` |
+|---------|--------|-----------|----------|
+| **`claude`** | `~/.claude` | **relocate** — strays → canonical §2 home; `--apply` moves (guarded) | whole tree minus the shared vendored/cache exclude set |
+| **`codebase`** | a git repo | **report-only** — flags TRACKED junk or junk that's present-and-not-gitignored; correctly-ignored junk is expected, not drift | exactly `git ls-files --cached --others --exclude-standard` (tracked + untracked-not-ignored), fed to `tar -T` |
+| **`llm-artifacts`** | `~/.claude/projects` | **report-only** — flags a valuable artifact (transcript/output) sitting inside a regenerable cache dir | valuable artifacts only; regenerable caches excluded |
+
+**Why `claude` alone relocates.** It is the only environment with a canonical
+"one home per file kind" layout, so a stray *has* a correct destination. A codebase
+or artifact store has no such canonical home — inferring one and moving files would
+be destructive — so cleanup there is strictly **detect-and-report** (it never
+mutates). This asymmetry is deliberate, not an unfinished feature.
+
+**Why the `codebase` profile delegates to git.** Ignore resolution is done by git
+itself (`git ls-files` / `--exclude-standard`), not a hand-rolled `.gitignore`
+parser — git is the authority, so `.gitignore` (negation, anchoring, nested
+ignores) is honoured exactly and the backup set == the archive by construction.
+Same reasoning by which this package spawns GNU `tar` instead of encoding tar
+itself: don't reimplement fragile parsing a trustworthy local tool already nails.
+Consequence: the `codebase` profile **requires a git working tree** — a non-repo
+target returns `unknown`, never a false pass. Nested repos/worktrees git lists as
+opaque directories are skipped (counted as `nested_skipped`), not folded in.
 
 ### The three entry points and why there are three
 
@@ -126,25 +163,32 @@ exactly one definition of a result and one definition of the honest-pass rule.
 
 ## Invocation
 
-Each control runs standalone:
+Each control runs standalone (default `--profile claude`):
 
 ```sh
-node checks/cleanup.mjs --target /path/to/tree          # dry-run drift report
-node checks/cleanup.mjs --target /path/to/tree --apply  # MOVE stray files (guarded)
-node checks/cleanup.mjs --self-test                     # prove the detector works
+node checks/cleanup.mjs --target /path/to/tree          # dry-run drift report (claude)
+node checks/cleanup.mjs --target ~/.claude --apply      # MOVE stray files (claude only, guarded)
+node checks/cleanup.mjs --profile codebase --target /repo        # report-only drift
+node checks/cleanup.mjs --profile llm-artifacts --target ~/.claude/projects
+node checks/cleanup.mjs --self-test --profile codebase  # prove the detector works
 
 node checks/backup.mjs  --target /path/to/tree          # dry-run: build + verify in temp
-node checks/backup.mjs  --target /path/to/tree --apply  # WRITE + re-verify the real archive
-node checks/backup.mjs  --self-test                     # prove the verifier works
+node checks/backup.mjs  --profile codebase --target /repo --apply   # gitignore-aware archive
+node checks/backup.mjs  --self-test --profile llm-artifacts
 ```
 
 The dispatcher runs both and aggregates:
 
 ```sh
-node run.mjs --target ~/.claude                 # both, dry-run
+node run.mjs --target ~/.claude                          # both, claude profile, dry-run
+node run.mjs --profile codebase --target /path/to/repo   # codebase profile
 node run.mjs --only backup --apply --target ~/.claude
-node run.mjs --self-test                        # every control's negative control
+node run.mjs --self-test --profile llm-artifacts         # every control's negative control
 ```
+
+> `--apply` on `cleanup` is accepted only by the `claude` profile (the relocating
+> one). For `codebase`/`llm-artifacts`, `--apply` is **rejected** with an `unknown`
+> result — those profiles are report-only and never mutate the target.
 
 ---
 
@@ -165,9 +209,21 @@ node run.mjs --self-test                        # every control's negative contr
   are dry-run by default and the moves are guarded (refuse to overwrite, verify the
   landing), but a careless `--apply` still changes a real home tree. The scheduled
   runner deliberately does NOT auto-move files.
-- **Rules are scope, not omniscience.** `manifests/cleanup.json` is the FIXED set
-  of kinds cleanup knows. A file of an *unknown* kind is not drift — it is simply
-  out of scope, reported as neither stray nor in-place. Add a rule to extend scope.
+- **Rules are scope, not omniscience.** Each profile's manifest is the FIXED set of
+  kinds it knows. A file of an *unknown* kind is not drift — it is out of scope,
+  reported as neither stray nor in-place. Extend scope by editing the profile.
+- **report-only is weaker than relocate — on purpose.** The `codebase` and
+  `llm-artifacts` profiles only *report* drift; they never fix it. That is a safety
+  choice (no canonical home to move to), not an oversight — acting on a finding is
+  the operator's call. Do not read a `codebase` `fail` as "hygiene will tidy it."
+- **The `codebase` profile needs a git working tree.** It delegates ignore
+  resolution to git; pointed at a non-repo it returns `unknown` (honest), never a
+  pass. Secret detection deliberately OVERLAPS `audit/secret-leak` and is **not**
+  reimplemented here — use the audit package for committed-secret findings.
+- **`llm-artifacts` cleanup must look *inside* caches.** Unlike the claude profile
+  (which excludes `cache`/`plugins`), this profile deliberately scans cache dirs —
+  that is the only way to catch a valuable transcript that landed in one. Its
+  `backup`, conversely, excludes those caches.
 - **The tree has vendored / transient regions hygiene does NOT touch.** One shared
   exclude set (`manifests/_exclude.json`) is read by BOTH controls and applied
   *identically* to every walk **and** to `tar --exclude=`. It prunes
@@ -253,9 +309,27 @@ real-environment bugs, now fixed and re-verified:
   now capped at the first 50 examples (`(+N more)`), with the full list/count kept
   in `details.stray`.
 
-The only remaining real-tree gap is the **unattended scheduled run on a specific
-operator's host** — the mechanism is identical (same `checks/` underneath), so
-the gap is *cron coverage*, not unverified logic.
+**The two new profiles, verified against real targets (not just fixtures).**
+
+- **`codebase` against the live `/studio` repo (~14k files walked).** `cleanup`
+  → **pass**, 0 committed/unignored junk (read-only — it changed nothing in
+  `/studio`). `backup` dry-run → **pass**, `expected_files == archive_entries`
+  (146 == 146), `missing: []`, with 4 nested git worktrees correctly skipped
+  (`nested_skipped: 4`) rather than mis-counted — the bug a naïve `git ls-files →
+  tar` would have hit, found and fixed during this smoke test. `.gitignored` paths
+  (`.env`, `clients/`, `.runstate/`, `node_modules`, `.next`) are excluded by git
+  itself.
+- **`llm-artifacts` against `~/.claude/projects` (~4.4k files, 464 transcripts).**
+  `cleanup` → **pass**, 0 transcripts misplaced in a cache dir. `backup` dry-run →
+  **pass**, `expected == archived` (4153 == 4153), caches excluded.
+- Both profiles' self-guards exercise the SAME code path offline: the `codebase`
+  self-test `git init`s a throwaway copy of its fixtures (so the git-authoritative
+  detector runs without a network or a real repo), and both bad fixtures, when
+  broken, flip `demo.mjs` to a non-zero exit (regression backstop confirmed).
+
+The remaining real-target gap is the **unattended scheduled run on a specific
+operator's host** (claude profile) — the mechanism is identical (same `checks/`
+underneath), so the gap is *cron coverage*, not unverified logic.
 
 **Out of code scope (named, not silently skipped).** The **off-system copy** of a
 verified archive (the P2 step the tool can only remind about), the **semantic

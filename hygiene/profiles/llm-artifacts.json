@@ -1,0 +1,27 @@
+{
+  "profile": "llm-artifacts",
+  "title": "an LLM artifact store (transcripts, outputs, caches)",
+  "target_default": "~/.claude/projects",
+  "describe": "A store of LLM artifacts: VALUABLE, irreplaceable artifacts (conversation transcripts *.jsonl, prompt/response logs, model outputs) intermixed with REGENERABLE caches (model/plugin/embedding caches). cleanup here is REPORT-ONLY: it flags valuable artifacts that have landed inside a regenerable cache directory (where a cache eviction would destroy them). backup captures only the valuable artifacts and deliberately excludes the regenerable caches — a backup of an artifact store should preserve the irreplaceable, not the disposable.",
+  "cleanup": {
+    "mode": "artifact-placement",
+    "title": "LLM-artifact placement drift detector (read-only)",
+    "use_shared_exclude": false,
+    "exclude": [".git", "node_modules"],
+    "valuable_globs": ["*.jsonl", "*.ndjson", "*.transcript", "*.prompt", "*.completion"],
+    "cache_dirs": ["cache", ".cache", "embeddings", "blobs", "tmp", "vector-store"],
+    "note": "REPORT ONLY — never moves/deletes. The shared exclude set is NOT applied here (it would skip `cache`/`plugins`, but those are exactly what we must look INSIDE to find a misplaced valuable artifact). Drift = a valuable artifact (a transcript / output by extension) whose path runs through a regenerable cache directory — it would be lost to a cache purge. Reporting it is the whole point; relocating it is the operator's call."
+  },
+  "backup": {
+    "engine": "exclude",
+    "title": "self-verifying artifact backup (caches excluded)",
+    "use_shared_exclude": false,
+    "include_roots": ["."],
+    "exclude": [".git", "node_modules", "cache", ".cache", "embeddings", "blobs", "tmp", "vector-store", "*.tar.gz"],
+    "output_dir": ".hygiene-backups/",
+    "archive_prefix": "artifacts_",
+    "sentinel_name": ".hygiene-backup-sentinel",
+    "note": "Excludes regenerable cache directories so the archive captures the valuable artifacts only. The exclude set is applied IDENTICALLY to the expected-file walk and to tar (the v0.2.1 invariant) so expected == archived holds."
+  },
+  "note": "FIXED scope (WORKING_METHOD §1). The valuable/regenerable split is the operator's declared policy, not model discretion."
+}
