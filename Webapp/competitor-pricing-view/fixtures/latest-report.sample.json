@@ -1,0 +1,16 @@
+{
+  "report_id": "rpt_2026-06-28_cof-eth-250",
+  "generated_at": "2026-06-28T06:00:00.000Z",
+  "currency": "GBP",
+  "product": {
+    "title": "Single Origin — Ethiopia Guji 250g",
+    "sku": "COF-ETH-250",
+    "your_price": 12.5
+  },
+  "competitors": [
+    { "name": "BeanRivals", "url": "https://beanrivals.example/p/eth-guji", "price": 13.0, "in_stock": true, "captured_at": "2026-06-28T05:58:00.000Z" },
+    { "name": "RoastCo", "url": "https://roastco.example/coffee/ethiopia-guji", "price": 11.95, "in_stock": false, "captured_at": "2026-06-28T05:58:30.000Z" },
+    { "name": "Highland Beans", "url": "https://highlandbeans.example/eth-250", "price": 12.5, "in_stock": true, "captured_at": "2026-06-28T05:59:00.000Z" },
+    { "name": "CafeDirect Clone", "url": "https://cafedirectclone.example/guji", "price": null, "in_stock": false, "captured_at": "2026-06-28T05:59:20.000Z" }
+  ]
+}
