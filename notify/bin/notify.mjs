@@ -5,7 +5,7 @@
 // (see ../hooks/settings.snippet.json). Claude Code passes the hook payload as
 // JSON on STDIN (hook_event_name, cwd, session_id, and a message field). This
 // script reads that, formats a one-line Telegram message, and POSTs it through
-// the shared seam (../src/client.mjs) to the hosted [STUDIO-NOTIFICATION] flow.
+// the shared seam (../src/client.mjs) to the hosted [STUDIO_NOTIFICATIONS] flow.
 //
 //   node bin/notify.mjs --kind=attention   # Notification hook (needs input)
 //   node bin/notify.mjs --kind=complete    # Stop hook (query finished)

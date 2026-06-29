@@ -1,7 +1,7 @@
 // packages/notify/src/client.mjs — the OUTBOUND notify seam (shared contract).
 //
 // Studio-internal infra. A thin, dependency-free function that POSTs a notify
-// event to the studio's hosted [STUDIO-NOTIFICATION] n8n workflow, which fans it
+// event to the studio's hosted [STUDIO_NOTIFICATIONS] n8n workflow, which fans it
 // out to Telegram. This module is the ONE place the request envelope + signature
 // are constructed, so every caller (the Claude Code hook in ../bin/notify.mjs,
 // and any in-repo caller) speaks the same contract.

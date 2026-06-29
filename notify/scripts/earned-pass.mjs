@@ -20,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import { buildRequest } from "../src/client.mjs";
 
-const WF_NAME = "[STUDIO_NOTIFICATION] Outbound Alerts";
+const WF_NAME = "[STUDIO_NOTIFICATIONS] Outbound Alerts";
 const TELEGRAM_NODE = "Telegram";
 
 function dotenv(p) { const o={}; try { for (const l of readFileSync(p,"utf8").split("\n")) { const m=l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i); if(m&&!l.trim().startsWith("#")) o[m[1]]=m[2].replace(/^["']|["']$/g,""); } } catch {} return o; }

@@ -1,7 +1,7 @@
 # notify — Claude Code → Telegram notifier
 
 A self-contained, reusable package: a Claude Code `Notification`/`Stop` hook POSTs
-a **signed** event to the studio's hosted `[STUDIO_NOTIFICATION]` n8n workflow,
+a **signed** event to the studio's hosted `[STUDIO_NOTIFICATIONS]` n8n workflow,
 which sends a **Telegram** message (🟡 needs input / 🟢 done). Studio ops tooling —
 it notifies the operator; it never ships inside a client build.
 
@@ -41,7 +41,7 @@ N8N_BASE_URL=... N8N_API_KEY=... BOT_TOKEN=8123...:AAH... node scripts/provision
 ```
 
 Builds + activates the 4-node workflow (Webhook → verify+format → Telegram →
-Respond) and places it in the `[STUDIO_NOTIFICATION]` n8n project. The graph is
+Respond) and places it in the `[STUDIO_NOTIFICATIONS]` n8n project. The graph is
 built in code — there is no committed `*.workflow.json` (the hosted workflow is
 studio infra, not a client deliverable). Prints the `NOTIFY_WEBHOOK_URL` +
 `NOTIFY_TOKEN` to store. Then prove it:

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/provision-n8n.mjs — provision the hosted [STUDIO-NOTIFICATION] workflow
+// scripts/provision-n8n.mjs — provision the hosted [STUDIO_NOTIFICATIONS] workflow
 // VIA THE n8n PUBLIC API (idempotent). The studio owns this n8n instance, so its
 // own repo defining its own hosted workflow as code is legitimate — this is NOT
 // the §8 boundary (that forbids workflow definitions in CLIENT-delivered repos).
@@ -23,8 +23,8 @@
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 
-const WF_NAME = "[STUDIO_NOTIFICATION] Outbound Alerts";
-const PROJECT_NAME = process.env.N8N_PROJECT || "[STUDIO_NOTIFICATION]";
+const WF_NAME = "[STUDIO_NOTIFICATIONS] Outbound Alerts";
+const PROJECT_NAME = process.env.N8N_PROJECT || "[STUDIO_NOTIFICATIONS]";
 const WEBHOOK_PATH = "studio-notify";
 
 // ── env (process.env first, then /studio/.env) ────────────────────────────────
@@ -116,7 +116,7 @@ if (ev && ev.schema === 'audit.alert.v1') {
 if (!title) title = '(studio-notify)';
 
 const m = body.meta || {};
-const bits = ['[STUDIO_NOTIFICATION]'];
+const bits = ['[STUDIO_NOTIFICATIONS]'];
 if (m.session) bits.push(m.session);
 if (m.cwd) bits.push(m.cwd);
 bits.push(m.at || new Date().toISOString().slice(11, 16));
@@ -225,7 +225,7 @@ async function main() {
 
   try { await api("POST", `/workflows/${wfId}/activate`); } catch (e) { process.stderr.write(`(activate: ${e.message})\n`); }
 
-  // Place the workflow + its credentials in the [STUDIO_NOTIFICATION] project
+  // Place the workflow + its credentials in the [STUDIO_NOTIFICATIONS] project
   // (best-effort; the public projects/transfer API is Enterprise-gated).
   try {
     const proj = (await api("GET", "/projects")).data?.find((p) => p.name === PROJECT_NAME);
@@ -242,7 +242,7 @@ async function main() {
 
   const url = `${N8N_BASE_URL}/webhook/${WEBHOOK_PATH}`;
   process.stdout.write(
-    `\n✓ [STUDIO_NOTIFICATION] workflow ${wfId} provisioned + activated.\n\n` +
+    `\n✓ [STUDIO_NOTIFICATIONS] workflow ${wfId} provisioned + activated.\n\n` +
     `Add these to ~/.claude/notify.env (chmod 600) and to /studio/.env:\n` +
     `  NOTIFY_WEBHOOK_URL=${url}\n` +
     `  NOTIFY_TOKEN=${SECRET}\n\n` +
