@@ -1,0 +1,18 @@
+{
+  "name": "@webapp/password-hygiene",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-side password strength + HaveIBeenPwned k-anonymity breach check. Only the first 5 chars of the SHA-1 hash leave the box; fails open if HIBP is unreachable. Node 22 built-ins only, zero config, no secrets. Reusable feature-package, consumed at a pinned version.",
+  "exports": {
+    ".": "./src/password.mjs",
+    "./password": "./src/password.mjs"
+  },
+  "scripts": {
+    "selftest": "node selftest.mjs"
+  },
+  "files": [
+    "src",
+    "reference"
+  ]
+}

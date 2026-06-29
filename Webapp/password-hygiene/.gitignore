@@ -1,0 +1,4 @@
+# Nothing here reads or writes secrets. This package is zero-config: the only
+# network call is to the public HIBP range API. Standard noise only.
+node_modules
+*.local
