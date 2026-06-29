@@ -6,7 +6,7 @@
 // are constructed, so every caller (the Claude Code hook in ../bin/notify.mjs,
 // and any in-repo caller) speaks the same contract.
 //
-// Node 22 built-ins only. No npm deps. (Same discipline as ~/packages/audit.)
+// Node 22 built-ins only. No npm deps. (Same discipline as ~/packages/Claude/audit.)
 //
 // AUTH — two gates, one shared secret (deliberately matching the studio's
 // established n8n contract: packages/integrations/src/n8n/hooks.ts, TE-16):
@@ -15,7 +15,7 @@
 //      runs (this is the handoff's wrong-token earned-pass).
 //   2. HMAC-SHA256 over `${timestamp}.${body}` in `x-notify-signature`, with the
 //      unix-ms time in `x-notify-timestamp`. Proves integrity + freshness (≤5min
-//      skew), and honours ~/packages/audit/notify/README.md's non-negotiable
+//      skew), and honours ~/packages/Claude/audit/notify/README.md's non-negotiable
 //      "sign the payload — do not post unsigned".
 //
 // Time is ALWAYS injected by the caller (`ts`), never read here — so the request

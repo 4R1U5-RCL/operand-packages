@@ -1,5 +1,5 @@
 {
-  "__comment": "Merge these hooks into ~/.claude/settings.json (user-level → fires for ALL Claude Code sessions) OR a project's .claude/settings.json. Adjust the path to wherever this package is installed (e.g. /root/packages/notify or /studio/packages/notify). Secrets are NOT here: bin/notify.mjs reads NOTIFY_WEBHOOK_URL/NOTIFY_TOKEN from the env or ~/.claude/notify.env, so this file is safe to commit. Set NOTIFY_ON_STOP=1 (env or notify.env) to also receive completion pings; without it the Stop hook is a silent no-op.",
+  "__comment": "Merge these hooks into ~/.claude/settings.json (user-level → fires for ALL Claude Code sessions) OR a project's .claude/settings.json. Adjust the path to wherever this package is installed (e.g. /root/packages/Claude/notify or /studio/packages/notify). Secrets are NOT here: bin/notify.mjs reads NOTIFY_WEBHOOK_URL/NOTIFY_TOKEN from the env or ~/.claude/notify.env, so this file is safe to commit. Set NOTIFY_ON_STOP=1 (env or notify.env) to also receive completion pings; without it the Stop hook is a silent no-op.",
   "hooks": {
     "Notification": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /root/packages/notify/bin/notify.mjs --kind=attention",
+            "command": "node /root/packages/Claude/notify/bin/notify.mjs --kind=attention",
             "timeout": 10
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /root/packages/notify/bin/notify.mjs --kind=complete",
+            "command": "node /root/packages/Claude/notify/bin/notify.mjs --kind=complete",
             "timeout": 10
           }
         ]

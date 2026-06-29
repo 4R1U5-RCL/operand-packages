@@ -67,7 +67,7 @@ always exits 0, so a webhook outage can never block a session.
 
 ## Second caller: the audit package
 
-`audit/notify/notify.mjs` (`send_alert`) wires to the SAME workflow by replacing
+`Claude/audit/notify/notify.mjs` (`send_alert`) wires to the SAME workflow by replacing
 its stub body with a signed POST (`audit.alert.v1` events → 🔴 alert format), which
 flips audit's `alert-route` check `unknown → pass`. Audit stays self-contained
 (its own signed POST, node built-ins only) — it does not import this package.
