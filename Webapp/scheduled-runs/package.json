@@ -1,0 +1,23 @@
+{
+  "name": "@studio/scheduled-runs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Recurring task runs as a reusable feature-package: the schedules table (owner-scoped RLS + REVOKE), app-side create/cancel actions, and the pure cadence/next-run math. The poller (a hosted n8n Schedule Trigger) stays studio infra and is described, never shipped — no client-side cron. Tier-gated by features.scheduledRuns.",
+  "exports": {
+    ".": "./src/cadence.mjs",
+    "./cadence": "./src/cadence.mjs"
+  },
+  "scripts": {
+    "selftest": "node selftest.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src",
+    "migrations",
+    "reference",
+    "docs"
+  ]
+}
