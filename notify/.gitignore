@@ -1,0 +1,4 @@
+# local secrets — never commit. The notifier reads creds from env or
+# ~/.claude/notify.env, not from anything in this package.
+notify.env
+*.local
