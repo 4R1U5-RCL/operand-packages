@@ -8,6 +8,8 @@
 
 -- it never answers "what is it now" (read live from Shopify), only "how it moved".
 
+-- NOTE: select is org-wide (not user-scoped) — intended for shared trends; revisit RLS scoping if a client is multi-tenant.
+
 create table if not exists "public"."tmpl_derived_history" (
   "id" bigint generated always as identity primary key,
   "entity_id" text not null,

@@ -40,6 +40,12 @@ create policy "tmpl_parent_requests_update_own"
   using ((select auth.uid()) = "user_id")
   with check ((select auth.uid()) = "user_id");
 
+drop policy if exists "tmpl_parent_requests_delete_own" on "public"."tmpl_parent_requests";
+create policy "tmpl_parent_requests_delete_own"
+  on "public"."tmpl_parent_requests" for delete
+  to authenticated
+  using ((select auth.uid()) = "user_id");
+
 drop policy if exists "tmpl_parent_requests_service_all" on "public"."tmpl_parent_requests";
 create policy "tmpl_parent_requests_service_all"
   on "public"."tmpl_parent_requests" for all

@@ -21,6 +21,7 @@ alter table "public"."tmpl_public_capture" enable row level security;
 
 revoke all on "public"."tmpl_public_capture" from anon, public;
 
+-- defense-in-depth: keep even though redundant today — protects PII if anon is ever given SELECT later.
 revoke select ("email", "phone") on "public"."tmpl_public_capture" from anon;
 
 grant insert on "public"."tmpl_public_capture" to anon, authenticated;
