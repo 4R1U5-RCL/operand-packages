@@ -9,6 +9,8 @@ pulling a pinned version**, never copy-forked into a container.
 - **[`Claude/`](Claude/)** — agent-side tooling for the studio (4 packages).
 - **[`Webapp/`](Webapp/)** — reusable web-app feature-packages extracted from Tessera
   (11 packages — see [`Webapp/README.md`](Webapp/README.md)).
+- **[`n8n/`](n8n/)** — hosted n8n workflow **templates** (10 importable workflow
+  definitions for the studio's own instance — see [`n8n/README.md`](n8n/README.md)).
 - **[`supabase/`](supabase/)** — reusable Supabase **schema templates** (6 idempotent
   RLS migrations / 7 tables for the §8.1 data shapes — see
   [`supabase/README.md`](supabase/README.md)).
@@ -42,6 +44,35 @@ view, migrations, and a doc of the matching n8n node.
 | [`Webapp/consent-log/`](Webapp/consent-log/) | Server-enforced GDPR signup consent gate + server-write-only `consent_accepted_at`/`consent_version` columns. | selftest ✓ |
 | [`Webapp/activity-feed/`](Webapp/activity-feed/) | Per-user in-app audit trail: one `logEvent()` seam + owner-read / server-insert `activity_events` table. *(New seam — a refactor of Tessera's inline writes.)* | selftest ✓ |
 | [`Webapp/stripe-billing/`](Webapp/stripe-billing/) | Stripe subscription lifecycle: signed webhook → idempotent absolute-state mirror into `profiles` + checkout/portal helpers; billing columns server-write-only. | ⚠️ **NOT live-wired / untested** — offline core only |
+
+## `n8n/` — hosted workflow templates
+
+Reusable n8n workflow **templates** for the studio's OWN hosted instance —
+importable node-graph definitions distilled from the live workflows
+(`[STUDIO_TESSERA]`, `[STUDIO_NOTIFICATIONS]`, `[TESSERA]`, `[MOSAIC]`,
+`[SCARLET]`). **Boundary, the other side of `Webapp/`:** `Webapp/` ships only the
+signed *hook/route* a client app uses to call a hosted workflow; `n8n/` is the
+hosted *definitions* themselves — studio-ops recurring IP, never copied into a
+client repo. Templates ship **inactive** with **unbound credential slots**;
+binding creds + activating is a deliberate human/ops step.
+
+Authored as code in the studio monorepo (`@studio/n8n-templates` primitives + the
+harness `n8n-template` app-class) and provisioned to the hosted `PACKAGE/Templates`
+project; this dir is the published, importable snapshot. See
+[`n8n/README.md`](n8n/README.md).
+
+| Template | Pattern |
+|----------|---------|
+| [`signed-webhook-base`](n8n/workflows/signed-webhook-base.json) | Base skeleton: webhook → dual-mode HMAC verify → 401 gate → fast ack → process → signed respond. |
+| [`read-only-json-api`](n8n/workflows/read-only-json-api.json) | GET webhook → Supabase REST select → shape → respond. |
+| [`notification-fanout`](n8n/workflows/notification-fanout.json) | verify → format → channel-parameterised delivery → respond after delivery. |
+| [`schedule-dispatcher`](n8n/workflows/schedule-dispatcher.json) | cron → query due rows → manual filter → fire webhook → write-back. |
+| [`llm-doc-pipeline-mono`](n8n/workflows/llm-doc-pipeline-mono.json) | analyse → map/scrape → combine → compose → store, with cost logging + spend guard (OpenRouter HTTP). |
+| [`orchestrator-routing`](n8n/workflows/orchestrator-routing.json) | webhook → switch on type → `executeWorkflow` dispatch to children. |
+| [`email-report`](n8n/workflows/email-report.json) | validate → compose → Resend `/emails` → log success/failure → respond. |
+| [`outbound-verdict-callback`](n8n/workflows/outbound-verdict-callback.json) | push to external webapp → read verdict → map → re-enter pipeline. |
+| [`shopify-webhook-reread`](n8n/workflows/shopify-webhook-reread.json) | Shopify HMAC verify → live re-read / cache invalidate → respond. **Never mirrors** commercial state. |
+| [`sms-state-machine`](n8n/workflows/sms-state-machine.json) | inbound → STOP/dedupe guards → identity/session lookup → AI decision → outbound + provider flag. |
 
 ## `supabase/` — schema templates
 
