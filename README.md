@@ -6,7 +6,8 @@ pulling a pinned version**, never copy-forked into a container.
 
 ## Layout
 
-- **[`Claude/`](Claude/)** — agent-side tooling for the studio (4 packages).
+- **[`Claude/`](Claude/)** — agent-side tooling for the studio: 4 code packages +
+  8 prompt skills (see [`Claude/README.md`](Claude/README.md)).
 - **[`Webapp/`](Webapp/)** — reusable web-app feature-packages extracted from Tessera
   (11 packages — see [`Webapp/README.md`](Webapp/README.md)).
 - **[`n8n/`](n8n/)** — hosted n8n workflow **templates** (10 importable workflow
@@ -17,12 +18,30 @@ pulling a pinned version**, never copy-forked into a container.
 
 ## `Claude/` — agent-side tooling
 
-| Package | What it is |
-|---------|------------|
+Two shapes, each a subfolder with a `SKILL.md` entry point — **code packages**
+(deterministic check core + CI/scheduled callers) and **prompt skills**
+(pure-prompt slash-commands, each folding a `PAT-*` error class into a blocking
+preflight). Full index in [`Claude/README.md`](Claude/README.md); the skill grid
+(args + guardrail each encodes) is in
+[`Claude/SKILLS-CHEATSHEET.md`](Claude/SKILLS-CHEATSHEET.md).
+
+| Code package | What it is |
+|--------------|------------|
 | [`Claude/audit/`](Claude/audit/) | ATT&CK × ISO 27001 × SOC 2 security verification for the studio stack — a deterministic check core with three entry points (agent skill, CI gate, scheduled runner). Every check is self-guarded so a pass is earned, never assumed. |
 | [`Claude/hygiene/`](Claude/hygiene/) | Config/codebase hygiene across three pluggable profiles (`claude` home-tree relocation, `codebase` git-aware backup + junk-drift report, `llm-artifacts` transcript backup). `cleanup` drift detector + self-verifying `backup`; report-only on non-`claude` profiles. Self-guarded so a pass is earned. |
 | [`Claude/consult/`](Claude/consult/) | Multi-model cross-validation — `research` + `validate` over one LiteLLM chain (base → GPT-5 → Gemini, optional Perplexity). Self-guarded offline; a corroborated/HIGH verdict needs the tiers to have actually responded, else `unknown` — never a fabricated answer. |
 | [`Claude/notify/`](Claude/notify/) | Claude Code → Telegram notifier. A `Notification`/`Stop` hook POSTs a signed event to the hosted `[STUDIO_NOTIFICATIONS]` n8n workflow, which pings Telegram (🟡 needs input / 🟢 done). Header-Auth + HMAC-signed; the live channel is proven via the n8n executions API. |
+
+| Prompt skill | What it does |
+|--------------|--------------|
+| [`Claude/harness-app-class/`](Claude/harness-app-class/) | Scaffold a NEW harness app-class + wire every registration point so the pipeline recognizes it (Track A studio-ops template class vs Track B served-app class). |
+| [`Claude/deploy-vercel/`](Claude/deploy-vercel/) | Take an already-built client app live on Vercel — confirms the real project ID, guards PAT-7/PAT-8. |
+| [`Claude/db-migrate/`](Claude/db-migrate/) | Apply a Supabase migration over HTTPS (Management API) + verify the object landed AND every new table has RLS (PAT-5). |
+| [`Claude/n8n-deploy/`](Claude/n8n-deploy/) | Push a workflow from `@studio/n8n-templates` to the hosted n8n instance (inactive by default); §8 boundary — never copies a definition into a client repo. |
+| [`Claude/dependabot-triage/`](Claude/dependabot-triage/) | List, group, gate-on-CI, and batch-merge Dependabot PRs across 4R1U5-RCL (green patch/minor only; majors held). |
+| [`Claude/ci-add-to-board/`](Claude/ci-add-to-board/) | Wire `actions/add-to-project` CI so new issues/PRs auto-add to a Projects board. |
+| [`Claude/app-security-audit/`](Claude/app-security-audit/) | App-surface security audit (RLS + response headers + SCA) of a built client repo, via the `audit` package — upstream of the harness `verify` stage. |
+| [`Claude/diagnose-secret/`](Claude/diagnose-secret/) | Diagnose a secret that looks right but 401s at runtime — narrows to one of the 4 PAT-11 causes; never echoes the value. |
 
 ## `Webapp/` — web-app feature-packages (from Tessera)
 

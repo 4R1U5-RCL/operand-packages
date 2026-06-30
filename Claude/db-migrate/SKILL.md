@@ -1,8 +1,10 @@
 ---
+name: db-migrate
 description: Apply a Supabase migration via the Management API and verify the table/policy + RLS landed
-argument-hint: [<migration-file-or-sql>] [--project=<ref>]
-allowed-tools: [Read, Bash, Grep]
+user-invocable: true
 ---
+
+# db-migrate
 
 Apply a Supabase schema migration and prove it took. In this environment the Postgres
 wire protocol is **unreachable** (PAT-5: default-deny egress is ~80/443 only, so ports
