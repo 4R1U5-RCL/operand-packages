@@ -11,6 +11,9 @@ pulling a pinned version**, never copy-forked into a container.
   (11 packages — see [`Webapp/README.md`](Webapp/README.md)).
 - **[`n8n/`](n8n/)** — hosted n8n workflow **templates** (10 importable workflow
   definitions for the studio's own instance — see [`n8n/README.md`](n8n/README.md)).
+- **[`supabase/`](supabase/)** — reusable Supabase **schema templates** (6 idempotent
+  RLS migrations / 7 tables for the §8.1 data shapes — see
+  [`supabase/README.md`](supabase/README.md)).
 
 ## `Claude/` — agent-side tooling
 
@@ -70,6 +73,30 @@ project; this dir is the published, importable snapshot. See
 | [`outbound-verdict-callback`](n8n/workflows/outbound-verdict-callback.json) | push to external webapp → read verdict → map → re-enter pipeline. |
 | [`shopify-webhook-reread`](n8n/workflows/shopify-webhook-reread.json) | Shopify HMAC verify → live re-read / cache invalidate → respond. **Never mirrors** commercial state. |
 | [`sms-state-machine`](n8n/workflows/sms-state-machine.json) | inbound → STOP/dedupe guards → identity/session lookup → AI decision → outbound + provider flag. |
+
+## `supabase/` — schema templates
+
+Reusable Supabase **schema templates** — one idempotent RLS migration per
+[`packages/db`](https://github.com/4R1U5-RCL/studio) §8.1 data shape, distilled
+into client-agnostic `tmpl_*` DDL. **Boundary:** only the three §8.1 shapes (app
+data Shopify doesn't own / a short-lived cache reconciled to Shopify / derived
+history) — **never** a mirror of Shopify's live commercial state. RLS-by-default +
+REVOKE discipline are baked into every table. Studio-ops reference schema, never
+copied into a client repo.
+
+Authored as code in the studio monorepo (`@studio/supabase-templates` primitives +
+the harness `supabase-template` app-class) and provisioned to the
+`studio/templates` project (`uzedswjxbgiuymleteud`); this dir is the published,
+importable snapshot. See [`supabase/README.md`](supabase/README.md).
+
+| Template | Shape | Pattern |
+|----------|-------|---------|
+| [`public-capture`](supabase/templates/public-capture.sql) | app data | `anon` insert-only / `service_role` read; PII columns REVOKEd. The permission-leak guard. |
+| [`per-user-owned`](supabase/templates/per-user-owned.sql) | app data | RLS scoped to `auth.uid() = user_id`; `service_role` full. |
+| [`child-owned-via-parent`](supabase/templates/child-owned-via-parent.sql) | app data | Transitive ownership: child rows scoped via `EXISTS` over the owned parent (two tables). |
+| [`server-write-only-lock`](supabase/templates/server-write-only-lock.sql) | app data | Per-user row with locked (`plan`/billing) columns — `UPDATE` REVOKEd from owner; server-write-only. |
+| [`shopify-cache`](supabase/templates/shopify-cache.sql) | cache | Short-lived, deliberately-stale, `service_role`-only; reconciled to Shopify — **never** a mirror. |
+| [`derived-history`](supabase/templates/derived-history.sql) | derived history | Append-only snapshots; `service_role` insert / `authenticated` read. Net-new data Shopify doesn't retain. |
 
 ## Conventions
 
