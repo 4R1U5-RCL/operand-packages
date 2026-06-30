@@ -1,8 +1,10 @@
 ---
+name: dependabot-triage
 description: Triage and batch-merge open Dependabot PRs across the 4R1U5-RCL repos (green patch/minor only; majors held for review)
-argument-hint: [<repo>] [--merge] [--dry-run]
-allowed-tools: [Bash, Read]
+user-invocable: true
 ---
+
+# dependabot-triage
 
 Triage the open Dependabot PRs across the `4R1U5-RCL` repos (`studio`, `tessera`, `mosaic`, `packages`), group them by package and semver bump type, check CI, and either print a plan (`--dry-run`, the default) or batch-merge the green non-major ones (`--merge`). Majors and red-CI PRs are NEVER auto-merged — they are deferred for human review.
 

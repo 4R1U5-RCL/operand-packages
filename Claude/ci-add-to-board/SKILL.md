@@ -1,8 +1,10 @@
 ---
+name: ci-add-to-board
 description: Wire actions/add-to-project CI into a 4R1U5-RCL repo so new issues/PRs auto-add to its GitHub Projects board
-argument-hint: <repo> [--board=<url>]
-allowed-tools: [Read, Write, Bash]
+user-invocable: true
 ---
+
+# ci-add-to-board
 
 Add the `actions/add-to-project` GitHub Actions workflow to a repo so every newly-opened issue and PR is auto-added to the right GitHub Projects v2 board. This is the route that actually works for `4R1U5-RCL` boards — the GitHub built-in "Auto-add to project" workflow is flaky for these User-level boards and never fires (don't retry it). This skill captures the copy-paste pattern already wired three times: `studio` (#6), `tessera` (#1/#2).
 

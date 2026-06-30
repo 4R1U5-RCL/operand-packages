@@ -1,8 +1,10 @@
 ---
+name: app-security-audit
 description: App-surface security audit (RLS + response headers + SCA) against a built client repo, via ~/packages/audit
-argument-hint: [<repo-or-path>] [--client=<slug>]
-allowed-tools: [Read, Bash, Grep]
+user-invocable: true
 ---
+
+# app-security-audit
 
 Run an **app-surface** security audit against a built client repo or sandbox: RLS
 policy coverage, HTTP response-headers, and software-composition (SCA / Dependabot)

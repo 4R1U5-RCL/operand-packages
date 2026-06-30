@@ -1,8 +1,10 @@
 ---
+name: n8n-deploy
 description: Push a workflow from @studio/n8n-templates to the hosted n8n instance (inactive by default)
-argument-hint: [<template-key>] [--activate]
-allowed-tools: [Read, Bash, Grep]
+user-invocable: true
 ---
+
+# n8n-deploy
 
 Provision one reusable n8n workflow TEMPLATE — composed from the
 `@studio/n8n-templates` primitive library — onto the studio's hosted n8n instance

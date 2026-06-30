@@ -1,8 +1,10 @@
 ---
+name: deploy-vercel
 description: Deploy a client app to Vercel with an explicit project-ID, env/secret, and known-trap preflight checklist
-argument-hint: [<app/client>] [--prod] [--preview]
-allowed-tools: [Read, Bash, Grep]
+user-invocable: true
 ---
+
+# deploy-vercel
 
 Deploy a client app (e.g. `/studio/clients/tessera`) to Vercel safely. The
 hazards here are not the deploy command itself — they are deploying to the
