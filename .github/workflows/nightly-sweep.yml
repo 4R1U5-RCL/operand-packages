@@ -1,0 +1,53 @@
+# nightly-sweep.yml — the dispatch runner for the nightly Dependabot + audit sweep.
+#
+# This is NOT a self-scheduled workflow. The cadence (nightly 07:00 UTC) lives in
+# the hosted n8n schedule; the receiver dispatches THIS workflow, which runs the
+# ops-agent's scheduled DRY-RUN runner and lets the digest go out over the notify
+# webhook seam. There is deliberately NO `schedule:` trigger here — the schedule is
+# owned by n8n, this repo just holds the runner.
+#
+# DRY-RUN IS STRUCTURAL. The runner (Claude/ops-agents/scheduled/nightly-sweep.mjs)
+# spawns the agent with --dry-run and NEVER forwards --apply: merging green
+# patch/minor Dependabot PRs and applying audit fixes stay DEFERRED to the main
+# session behind an explicit --apply. The `dry_run` input below documents the
+# dispatch interface; even a `false` dispatch stays dry-run because the runner has
+# no path to a guarded write (per feedback_main-session-executes-guarded-infra).
+
+name: nightly-sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run only (the runner is dry-run-only regardless; --apply is never forwarded from CI).'
+        type: string
+        default: 'true'
+
+# Reads only. The agent reaches read-only `gh` for Dependabot PRs + code-scanning
+# signal and POSTs a digest to the notify webhook; it performs ZERO guarded I/O.
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the packages repo (holds the ops-agent)
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run the nightly-sweep DRY-RUN runner
+        # scheduled/nightly-sweep.mjs spawns the agent with --dry-run (never
+        # --apply) and mirrors its exit: 0 ok · 1 agent not-ok (crash / guarded
+        # write caught in-agent) · 2 no parseable report. The gate reflects agent
+        # HEALTH — the sweep itself is an informational digest, not an alarm.
+        # Any absent cred is an honest-skip with a note, never a crash.
+        run: node Claude/ops-agents/scheduled/nightly-sweep.mjs --dry-run
+        env:
+          NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+          NOTIFY_TOKEN: ${{ secrets.NOTIFY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
