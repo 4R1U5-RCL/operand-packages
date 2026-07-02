@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# studio-db-migrate — narrow, self-contained wrapper around the Supabase
+# Management API query endpoint (DDL apply + read-only verify).
+#
+# Why this exists: the /db-migrate skill inlined the curl inside a
+# `set -a; . /studio/.env; set +a; ...` compound block, which never matches a
+# raw Bash(curl:*) allow. This wrapper sources its own env and is invoked as ONE
+# simple command, so `Bash(studio-db-migrate:*)` matches cleanly in permissions
+# AND autoMode (permissions.allow does not override the auto-mode classifier, so
+# the same matcher must be present in autoMode.allow for unattended DDL).
+#
+# Usage:
+#   studio-db-migrate --project-ref <ref> --file <path.sql>
+#   studio-db-migrate --project-ref <ref> --sql  "<inline sql>"
+#   studio-db-migrate --project-ref <ref> --verify "<catalog query sql>"   # read-only
+#
+# Secrets: SUPABASE_ACCESS_TOKEN (sbp_ Management API PAT), sourced from
+# $STUDIO_ENV (default /studio/.env). Never echoed.
+
+ENV_FILE="${STUDIO_ENV:-/studio/.env}"
+REF=""; SQL=""; FILE=""; MODE="apply"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --project-ref) REF="${2:-}"; shift 2 ;;
+    --file)        FILE="${2:-}"; shift 2 ;;
+    --sql)         SQL="${2:-}";  shift 2 ;;
+    --verify)      SQL="${2:-}"; MODE="verify"; shift 2 ;;
+    -h|--help)     grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "studio-db-migrate: unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+[ -n "$REF" ] || { echo "studio-db-migrate: --project-ref required" >&2; exit 2; }
+if [ -n "$FILE" ]; then
+  [ -f "$FILE" ] || { echo "studio-db-migrate: file not found: $FILE" >&2; exit 2; }
+  SQL="$(cat "$FILE")"
+fi
+[ -n "$SQL" ] || { echo "studio-db-migrate: need --file, --sql, or --verify" >&2; exit 2; }
+[ -f "$ENV_FILE" ] || { echo "studio-db-migrate: env file not found: $ENV_FILE" >&2; exit 2; }
+
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+: "${SUPABASE_ACCESS_TOKEN:?studio-db-migrate: SUPABASE_ACCESS_TOKEN not in $ENV_FILE}"
+
+# Build the JSON body via node (JSON.stringify) — never string interpolation, so
+# the SQL cannot break out of the JSON or the shell (injection-safe).
+BODY="$(SQL="$SQL" node -e 'process.stdout.write(JSON.stringify({query:process.env.SQL}))')"
+
+OUT="$(mktemp)"; trap 'rm -f "$OUT"' EXIT
+HTTP_CODE="$(curl -sS -o "$OUT" -w '%{http_code}' \
+  -X POST "https://api.supabase.com/v1/projects/${REF}/database/query" \
+  -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "$BODY")"
+
+cat "$OUT"; echo
+# The Management API /database/query endpoint returns 201 (Created) on success,
+# not 200 — accept any 2xx.
+case "$HTTP_CODE" in
+  2*) echo "studio-db-migrate: OK (HTTP $HTTP_CODE mode=$MODE ref=$REF)" ;;
+  *)  echo "studio-db-migrate: HTTP $HTTP_CODE (mode=$MODE ref=$REF)" >&2; exit 1 ;;
+esac

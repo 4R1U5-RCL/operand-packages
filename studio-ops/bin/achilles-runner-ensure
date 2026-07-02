@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# achilles-runner-ensure — start achilles-runner-loop if it is not running.
+# Fast + silent: safe to call from a Claude Code SessionStart hook. Detaches
+# fully (setsid + nohup) so the loop outlives the session that started it.
+set -u
+PIDFILE="$HOME/.config/achilles/runner-loop.pid"
+if [ -f "$PIDFILE" ] && [ -d "/proc/$(cat "$PIDFILE" 2>/dev/null)" ]; then
+  exit 0
+fi
+mkdir -p "$HOME/.config/achilles"
+setsid nohup "$(dirname "$0")/achilles-runner-loop" >/dev/null 2>&1 &
+exit 0

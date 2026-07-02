@@ -1,11 +1,11 @@
 {
   "profile": "claude",
-  "title": "IOPHON ~/.claude home tree (§2 canonical layout)",
+  "title": "ACHILLES ~/.claude home tree (§2 canonical layout)",
   "target_default": "~/.claude",
   "describe": "The operator's Claude home tree, where each kind of file has exactly one canonical subdirectory. This is the only profile whose cleanup can RELOCATE (it has a canonical home to move strays into); codebase and llm-artifacts have no such home and are report-only.",
   "cleanup": {
     "mode": "relocate",
-    "title": "config drift detector (IOPHON ~/.claude §2 layout)",
+    "title": "config drift detector (ACHILLES ~/.claude §2 layout)",
     "use_shared_exclude": true,
     "exclude": [],
     "rules": [

@@ -1,4 +1,4 @@
-# IOPHON Skills Cheat Sheet
+# ACHILLES Skills Cheat Sheet
 
 All slash-commands in `~/.claude/commands/`. Invoke as `/<name> [args]`.
 Last updated: 2026-06-30.
@@ -43,7 +43,7 @@ Last updated: 2026-06-30.
 
 | Skill | Does | Output |
 |---|---|---|
-| `/audit` | Comprehensive IOPHON system audit (security/network/permission/system) | `~/.claude/data/audits/` |
+| `/audit` | Comprehensive ACHILLES system audit (security/network/permission/system) | `~/.claude/data/audits/` |
 | `/backup` | Tar.gz `~/.claude/` + Dreamworld dirs, prompt for off-system copy | `~/.claude/data/backups/` |
 | `/cleanup` | Move stray files in `~/.claude/` to their correct subdirs per CLAUDE.md §2 | reorganizes in place |
 

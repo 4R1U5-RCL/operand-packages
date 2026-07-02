@@ -1,0 +1,14 @@
+# achilles-queue-runner.timer — fires the runner on boot + every 15 minutes.
+#
+# Persistent=true replays a tick missed while powered off; the durable queue
+# makes even that a nicety, not a requirement — overdue rows wait to be claimed,
+# and coalesce_key collapses N missed ticks of one task into ONE run.
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

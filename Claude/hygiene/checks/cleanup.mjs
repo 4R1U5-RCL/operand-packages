@@ -4,7 +4,7 @@
 // A drift detector across THREE profiles (profiles/<name>.json, --profile, default
 // `claude`). Each profile declares cleanup.mode; this script dispatches on it:
 //
-//   claude  / mode "relocate"          the IOPHON ~/.claude §2 layout. Each file
+//   claude  / mode "relocate"          the ACHILLES ~/.claude §2 layout. Each file
 //                                       kind has ONE canonical home, so a stray can
 //                                       be MOVED (--apply). The only mutating mode.
 //   codebase/ mode "git-junk"          a git working tree. REPORT-ONLY. Junk is

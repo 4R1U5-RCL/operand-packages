@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# studio-vercel-deploy — narrow, self-contained wrapper around the client Vercel
+# deploy flow (pull → build → deploy → smoke).
+#
+# Why this exists: the /deploy-vercel skill runs `DEPLOY_URL=$(vercel deploy ...)`,
+# a command-substitution form that never matches a raw Bash(vercel deploy:*) allow.
+# This wrapper keeps the substitution INSIDE the script and is invoked as ONE
+# simple command, so `Bash(studio-vercel-deploy:*)` matches cleanly.
+#
+# Usage: studio-vercel-deploy --client <slug> [--prod|--preview]
+#
+# Secrets: VERCEL_TOKEN, sourced from $STUDIO_ENV (default /studio/.env). The trap
+# vars VERCEL_PROJECT_ID / VERCEL_ORG_ID (which point at studio-storefront) are
+# unset so the repo's own .vercel/project.json link wins.
+
+ENV_FILE="${STUDIO_ENV:-/studio/.env}"
+CLIENT=""; IS_PROD=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --client)  CLIENT="${2:-}"; shift 2 ;;
+    --prod)    IS_PROD=1; shift ;;
+    --preview) IS_PROD=0; shift ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "studio-vercel-deploy: unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+[ -n "$CLIENT" ] || { echo "studio-vercel-deploy: --client required" >&2; exit 2; }
+APP_DIR="/studio/clients/${CLIENT}"
+[ -d "$APP_DIR" ] || { echo "studio-vercel-deploy: no such client dir: $APP_DIR" >&2; exit 2; }
+[ -f "$APP_DIR/.vercel/project.json" ] || {
+  echo "studio-vercel-deploy: $APP_DIR not linked (.vercel/project.json missing)" >&2; exit 2; }
+[ -f "$ENV_FILE" ] || { echo "studio-vercel-deploy: env file not found: $ENV_FILE" >&2; exit 2; }
+
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+unset VERCEL_PROJECT_ID VERCEL_ORG_ID
+: "${VERCEL_TOKEN:?studio-vercel-deploy: VERCEL_TOKEN not in $ENV_FILE}"
+
+cd "$APP_DIR"
+# Pull the env that MATCHES the build target. `vercel build` (no --prod) reads
+# .vercel/.env.preview.local, which only `pull --environment=preview` writes —
+# pulling production for a preview build leaves NEXT_PUBLIC_* un-inlined in the
+# client bundle (browser-side breakage on previews only; found 2026-07-02, IN-14).
+if [ "$IS_PROD" = "1" ]; then
+  vercel pull --yes --environment="${VERCEL_ENV:-production}" --token "$VERCEL_TOKEN"
+  vercel build --prod --token "$VERCEL_TOKEN"
+  DEPLOY_RAW="$(vercel deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN")"
+else
+  vercel pull --yes --environment="${VERCEL_ENV:-preview}" --token "$VERCEL_TOKEN"
+  vercel build --token "$VERCEL_TOKEN"
+  DEPLOY_RAW="$(vercel deploy --prebuilt --yes --token "$VERCEL_TOKEN")"
+fi
+
+# The vercel@claude-plugins-official plugin emits a JSON object, not a bare URL.
+# Extract deployment.url from JSON when present; otherwise take the first https URL.
+DEPLOY_URL="$(printf '%s' "$DEPLOY_RAW" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{s=s.trim();let u="";try{const j=JSON.parse(s);u=(j.deployment&&j.deployment.url)||j.url||"";}catch(e){}if(!u){const m=s.match(/https:\/\/[^\s"]+/);u=m?m[0]:"";}if(u&&!/^https?:\/\//.test(u))u="https://"+u;process.stdout.write(u)})')"
+
+echo "Deployed: $DEPLOY_URL"
+if [ -n "$DEPLOY_URL" ]; then
+  CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$DEPLOY_URL" || true)"
+  echo "Smoke: HTTP $CODE"
+else
+  echo "Smoke: skipped (could not parse deploy URL)"
+fi

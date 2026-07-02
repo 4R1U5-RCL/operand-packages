@@ -1,6 +1,6 @@
 # hygiene — self-verifying backup + drift detection across three environments
 
-A self-contained, reusable package that **tends** a tree — the IOPHON home config
+A self-contained, reusable package that **tends** a tree — the ACHILLES home config
 tree, a source codebase, or an LLM-artifact store — via a chosen **profile**
 (`--profile`, default `claude`). It folds two operator skills into hardened,
 self-guarded units:
@@ -228,9 +228,9 @@ node run.mjs --self-test --profile llm-artifacts         # every control's negat
   exclude set (`manifests/_exclude.json`) is read by BOTH controls and applied
   *identically* to every walk **and** to `tar --exclude=`. It prunes
   `.git`, `node_modules`, `.pnpm-store`, `.next`, `plugins` (the plugin cache —
-  its bundled `SKILL.md`/`*.md` are plugin payload, **not** misplaced IOPHON
+  its bundled `SKILL.md`/`*.md` are plugin payload, **not** misplaced ACHILLES
   docs), `projects` (multi-GB conversation JSONL histories), and `cache`. Each is
-  transient/regenerable or not IOPHON-managed. Excluding them is what keeps
+  transient/regenerable or not ACHILLES-managed. Excluding them is what keeps
   `cleanup` from false-flagging 2,585 plugin-cache files as strays, and what makes
   `backup`'s expected-file walk agree with the archive (the equality the verifier
   needs). Matching mirrors GNU tar's default *unanchored* exclude (a bare name

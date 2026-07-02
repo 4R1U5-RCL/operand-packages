@@ -11,7 +11,7 @@ user-invocable: true
 Run an **app-surface** security audit against a built client repo or sandbox: RLS
 policy coverage, HTTP response-headers, and software-composition (SCA / Dependabot)
 checks. This is a variant of the system `/audit` (same family, same house style) but
-pointed at a *delivered application*, not the IOPHON installation itself.
+pointed at a *delivered application*, not the ACHILLES installation itself.
 
 **Where this sits.** This is an OPERATOR DIAGNOSTIC that sits *upstream* of the
 harness `verify` stages — not a re-implementation of them. The harness evaluator
@@ -168,5 +168,5 @@ Overall: <SECURE | WARNINGS | CRITICAL>
 - Audit tool: `~/packages/audit/` — dispatcher `run.mjs`; scope in `SKILL.md` +
   `manifests/*.json`; infra config example `scheduled/infra.config.example.json`.
 - RLS / §8.1 boundary: `/studio/CLAUDE.md` (`packages/db` section).
-- Related: the system `/audit` (IOPHON installation, not client apps); the harness
+- Related: the system `/audit` (ACHILLES installation, not client apps); the harness
   `verify` stages (pipeline source of truth).

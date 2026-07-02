@@ -1,0 +1,45 @@
+# managed-by: audit/ci/pre-push-audit-guard
+#!/usr/bin/env sh
+# pre-push-audit-guard.sh — LOCAL git pre-push guard.
+#
+# Runs the audit package's REPO-surface checks (secret-leak, rls, revoke) over
+# the repo before each push and BLOCKS the push on any FAIL. Complements the
+# pre-commit secret guard (which catches leaks at commit time): this is the
+# last local gate before anything reaches GitHub — "sec audits prior to
+# posting", event-triggered, independent of the ops-task-queue scheduler.
+#
+# Behaviour mirrors the pre-commit guard's contract:
+#   * any [FAIL] on the repo surface  -> BLOCK (exit 1)
+#   * clean / inconclusive-only       -> allow (exit 0)
+#   * tooling missing                 -> WARN, allow (exit 0)  [fail-open on
+#       tooling, fail-closed on a real finding]
+# Emergency bypass (use only when you are certain): git push --no-verify
+
+AUDIT_RUN="${AUDIT_RUN:-/root/packages/Claude/audit/run.mjs}"
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -z "$REPO_ROOT" ] && exit 0
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-push audit guard: 'node' not found — skipping (NOT blocking)." >&2
+  exit 0
+fi
+if [ ! -f "$AUDIT_RUN" ]; then
+  echo "pre-push audit guard: audit runner missing at $AUDIT_RUN — skipping (NOT blocking)." >&2
+  exit 0
+fi
+
+OUT="$(node "$AUDIT_RUN" --surface repo --target "$REPO_ROOT" 2>&1)"
+
+if printf '%s' "$OUT" | grep -q '\[FAIL\]'; then
+  echo "" >&2
+  echo "🔒 PUSH BLOCKED — repo-surface audit found a problem:" >&2
+  printf '%s\n' "$OUT" | grep -A1 '\[FAIL\]' >&2
+  echo "" >&2
+  echo "  Fix the finding, then push again." >&2
+  echo "  True emergency only: git push --no-verify" >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0

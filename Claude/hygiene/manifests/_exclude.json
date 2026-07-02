@@ -8,13 +8,13 @@
     "projects",
     "cache"
   ],
-  "note": "THE SINGLE shared exclude set, read by BOTH controls (cleanup + backup) and applied IDENTICALLY to every tree walk AND to the `tar --exclude=` invocation. One source, applied everywhere, so the backup expected-file walk and the archive entry set agree (the invariant that lets verify pass on a real ~/.claude). Each entry is a bare directory name and is matched UNANCHORED, at any depth — mirroring GNU tar's default `--exclude` behaviour (a matching directory and its whole subtree are skipped). These trees are transient/regenerable or not IOPHON-managed, so they are neither backed up nor scanned for layout drift.",
+  "note": "THE SINGLE shared exclude set, read by BOTH controls (cleanup + backup) and applied IDENTICALLY to every tree walk AND to the `tar --exclude=` invocation. One source, applied everywhere, so the backup expected-file walk and the archive entry set agree (the invariant that lets verify pass on a real ~/.claude). Each entry is a bare directory name and is matched UNANCHORED, at any depth — mirroring GNU tar's default `--exclude` behaviour (a matching directory and its whole subtree are skipped). These trees are transient/regenerable or not ACHILLES-managed, so they are neither backed up nor scanned for layout drift.",
   "rationale": {
     ".git": "version-control internals (including nested repos under plugins/) — regenerable from the remote, not config to preserve, and noise for a layout scan.",
-    "node_modules": "vendored dependencies — regenerable from a lockfile, never IOPHON config.",
+    "node_modules": "vendored dependencies — regenerable from a lockfile, never ACHILLES config.",
     ".pnpm-store": "the pnpm content-addressed package store — a regenerable package cache, not config.",
     ".next": "Next.js build output — regenerable, transient.",
-    "plugins": "Claude Code plugin cache (plugins/cache/**). Its bundled SKILL.md / *.md files are plugin payload, NOT misplaced IOPHON docs — scanning it produced 2,585 false-positive 'stray skill' findings. Not IOPHON-managed.",
+    "plugins": "Claude Code plugin cache (plugins/cache/**). Its bundled SKILL.md / *.md files are plugin payload, NOT misplaced ACHILLES docs — scanning it produced 2,585 false-positive 'stray skill' findings. Not ACHILLES-managed.",
     "projects": "per-project conversation JSONL histories (multi-GB). Not §2-managed config and far too large to fold into a config-tree backup.",
     "cache": "any obvious cache dir — short-lived, regenerable, not config."
   }

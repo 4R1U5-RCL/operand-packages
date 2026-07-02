@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# achilles-runner-loop — in-container poller for the ops-task-queue runner.
+#
+# For the containerized ACHILLES setup WITHOUT host access (no sudo, no host
+# systemd): the container is root but has no init, so this loop IS the timer —
+# singleton via pidfile, one runner cycle every $ACHILLES_POLL_SECONDS (900).
+# Kept alive by achilles-runner-ensure (Claude Code SessionStart hook); a
+# container restart kills it until the next session starts — the durable queue
+# holds overdue rows across that gap by design.
+#
+# The runner performs NO guarded writes (dry-run agents + bookkeeping only).
+set -u
+
+ENV_FILE="${ACHILLES_RUNNER_ENV:-$HOME/.config/achilles/queue-runner.env}"
+PIDFILE="$HOME/.config/achilles/runner-loop.pid"
+LOG="$HOME/.config/achilles/runner-loop.log"
+SLEEP="${ACHILLES_POLL_SECONDS:-900}"
+
+mkdir -p "$(dirname "$PIDFILE")"
+
+# Singleton: live pid in the pidfile wins (no pgrep in this container — /proc check).
+if [ -f "$PIDFILE" ] && [ -d "/proc/$(cat "$PIDFILE" 2>/dev/null)" ]; then
+  exit 0
+fi
+echo $$ > "$PIDFILE"
+
+while true; do
+  {
+    echo "--- tick $(date -u +%FT%TZ) ---"
+    if [ -f "$ENV_FILE" ]; then
+      ( set -a; . "$ENV_FILE"; set +a
+        cd /studio/clients/_ops-agents && npx tsx agents/queue-runner.ts )
+    else
+      echo "env file missing: $ENV_FILE — skipping tick"
+    fi
+  } >> "$LOG" 2>&1
+  # keep the log bounded (~500 KB)
+  if [ "$(wc -c < "$LOG")" -gt 500000 ]; then tail -c 250000 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"; fi
+  sleep "$SLEEP"
+done

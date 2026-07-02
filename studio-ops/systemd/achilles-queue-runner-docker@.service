@@ -1,0 +1,27 @@
+# achilles-queue-runner-docker@.service — host-side shim: one poll cycle of the
+# queue runner, executed INSIDE the dev container via docker exec.
+#
+# Use this variant when /studio lives in a container (the normal ACHILLES setup):
+# the container has no init/systemd, so the HOST owns the clock and the
+# container owns the execution environment (agents, toolchain, local state).
+# %i = container name:  systemctl enable --now achilles-queue-runner-docker@<name>.timer
+#
+# Creds stay HOST-side (root:root 0600 /etc/achilles/queue-runner.env) and are
+# injected per-run via --env-file — they never persist inside the container.
+
+[Unit]
+Description=ACHILLES ops-task-queue runner via docker exec into %i
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Best-effort: bring the container up if it is stopped ('-' ignores failure —
+# if it cannot start, the exec fails, the tick is lost, and the durable queue
+# holds the rows for the next tick. That is the designed behaviour.)
+ExecStartPre=-/usr/bin/docker start %i
+ExecStart=/usr/bin/docker exec --env-file /etc/achilles/queue-runner.env -w /studio/clients/_ops-agents %i npx tsx agents/queue-runner.ts
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target
