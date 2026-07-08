@@ -1,0 +1,375 @@
+{
+  "name": "[TEMPLATE] [dirnotif_plugin] Daily Digest — Agentic Email Add-on",
+  "nodes": [
+    {
+      "id": "every-morning",
+      "name": "Every Morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-qualified",
+      "name": "Read Qualified",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_qualified?select=*&order=composite_score.desc&created_at=gte.{{ new Date(new Date().setUTCHours(0,0,0,0) - 86400000).toISOString() }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "compose-digest",
+      "name": "Compose Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\n// Spend guard for the OPTIONAL summary line (fail-open): no reachable numeric cap or\n// budget exhausted => summary NOT ok, the deterministic digest ships regardless.\nconst CAP = Number(readSecret(\"DIRNOTIF_LLM_DAILY_BUDGET_USD\"));\nconst capOk = Number.isFinite(CAP) && CAP > 0;\nconst s = $getWorkflowStaticData('global');\nconst today = new Date().toISOString().slice(0, 10);\nif (s.dirnotif_digest_spend_day !== today) { s.dirnotif_digest_spend_day = today; s.dirnotif_digest_spend_usd = 0; }\nconst summaryOk = capOk && (Number(s.dirnotif_digest_spend_usd) || 0) < CAP;\n\n// PAT-4 guard: hosted n8n Cloud hands JSON bodies back PRE-PARSED (LIVE 2026-07-07)\n// — parse OBJECT-FIRST, never .toString()+JSON.parse.\nconst rows = [];\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  const body = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(j.body);\n  if (Array.isArray(body)) rows.push(...body);\n  else if (body && typeof body === 'object') rows.push(body);\n}\nconst esc = (x) => String(x == null ? '' : x)\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst digestDate = new Date(Date.now() - 86400000).toISOString().slice(0, 10);\nconst byBand = { HOT: [], WARM: [], REVIEW: [], COLD: [] };\nfor (const r of rows) {\n  const b = (r && r.band && byBand[r.band]) ? r.band : 'COLD';\n  byBand[b].push(r || {});\n}\nconst line = (r) => {\n  const title = esc(r.title || r.category || '(untitled)');\n  const why = r.why ? ' — ' + esc(r.why) : '';\n  const angle = r.suggested_angle ? '<br><em>Angle: ' + esc(r.suggested_angle) + '</em>' : '';\n  const link = r.url ? ' <a href=\"' + esc(r.url) + '\">open</a>' : '';\n  return '<li><strong>' + title + '</strong>' + why + link + angle + '</li>';\n};\nconst section = (label, items) => items.length\n  ? '<h3>' + label + ' (' + items.length + ')</h3><ul>' + items.map(line).join('') + '</ul>'\n  : '';\nconst parts = [\n  section('🔥 HOT', byBand.HOT),\n  section('WARM', byBand.WARM),\n  section('REVIEW — verify these (false-negative catch)', byBand.REVIEW),\n  section('COLD', byBand.COLD),\n];\nconst total = rows.length;\nconst hot = byBand.HOT.length;\nconst bodyHtml = total\n  ? parts.filter(Boolean).join('')\n  : '<p>No qualified community leads in the last day.</p>';\nconst subject = 'Community Lead Digest — ' + digestDate + ' (' + total + ' leads, ' + hot + ' hot)';\n// The summary prompt is decision support; the LLM line is prepended only if enabled.\nconst summaryPrompt = 'Summarise this daily community-lead digest in ONE plain sentence '\n  + 'for a busy founder. Digest:\\n' + rows.map((r) =>\n      '- [' + (r.band || '?') + '] ' + (r.title || r.category || '') + (r.why ? ': ' + r.why : '')\n    ).join('\\n');\nreturn [{ json: {\n  __digest_date: digestDate,\n  __lead_count: total,\n  __hot_count: hot,\n  __subject: subject,\n  __body_html: bodyHtml,\n  __summary_ok: summaryOk && total > 0,\n  __summary_prompt: summaryPrompt,\n} }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "summary",
+      "name": "Summary?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "summary-cond",
+              "leftValue": "={{ $json.__summary_ok === true && (($vars.DIRNOTIF_DIGEST_SUMMARY_MODEL || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "llm-summary",
+      "name": "LLM Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 120000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Title",
+              "value": "STUDIO dirnotif-digest"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"anthropic/claude-haiku-4-5\", temperature: 0, max_tokens: 200, messages: ([{ role: \"user\", content: $json.__summary_prompt }]) }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "attach-summary",
+      "name": "Attach Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compose Digest').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let summary = null;\n  const content = parsed && parsed.choices && parsed.choices[0]\n    && parsed.choices[0].message && parsed.choices[0].message.content;\n  if (typeof content === 'string' && content.trim()) summary = content.trim().slice(0, 400);\n  const html = summary\n    ? '<p><strong>Summary:</strong> ' + summary.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>' + c.__body_html\n    : c.__body_html;\n  out.push({ json: Object.assign({}, c, { __body_html: html }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-summary",
+      "name": "Skip Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    },
+    {
+      "id": "send-digest",
+      "name": "Send Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: ($vars.DIRNOTIF_DIGEST_FROM), to: [($vars.DIRNOTIF_DIGEST_TO)], subject: $json.__subject, html: $json.__body_html }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "stamp-sent",
+      "name": "Stamp Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compose Digest').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  const messageId = (parsed && (parsed.id || parsed.message_id)) || null;\n  out.push({ json: Object.assign({}, c, {\n    __sent_at: (status >= 200 && status < 300) ? new Date().toISOString() : null,\n    __message_id: messageId,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "log-digest",
+      "name": "Log Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_digest_log?on_conflict=digest_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ digest_date: $json.__digest_date, sent_at: $json.__sent_at, lead_count: $json.__lead_count, hot_count: $json.__hot_count, message_id: $json.__message_id }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Every Morning": {
+      "main": [
+        [
+          {
+            "node": "Read Qualified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Qualified": {
+      "main": [
+        [
+          {
+            "node": "Compose Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Digest": {
+      "main": [
+        [
+          {
+            "node": "Summary?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary?": {
+      "main": [
+        [
+          {
+            "node": "LLM Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Summary": {
+      "main": [
+        [
+          {
+            "node": "Attach Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Digest": {
+      "main": [
+        [
+          {
+            "node": "Stamp Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp Sent": {
+      "main": [
+        [
+          {
+            "node": "Log Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Australia/Sydney"
+  },
+  "active": false
+}

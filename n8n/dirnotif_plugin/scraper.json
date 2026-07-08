@@ -1,0 +1,1231 @@
+{
+  "name": "[TEMPLATE] [dirnotif_plugin] Community Lead Radar — Scraper (base brick)",
+  "nodes": [
+    {
+      "id": "poll",
+      "name": "Poll",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_config?select=*",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "read-cursors",
+      "name": "Read Cursors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_cursor?select=*",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "reddit-ctx",
+      "name": "Reddit Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const cfg = [];\nfor (const it of $('Read Config').all()) {\n  const b = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })((it.json || {}).body);\n  if (Array.isArray(b)) cfg.push(...b); else if (b && typeof b === 'object') cfg.push(b);\n}\nconst cursors = [];\nfor (const it of $('Read Cursors').all()) {\n  const b = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })((it.json || {}).body);\n  if (Array.isArray(b)) cursors.push(...b); else if (b && typeof b === 'object') cursors.push(b);\n}\nconst src = cfg.find((r) => r && r.config_type === 'source' && r.value === \"reddit\");\nif (!src || src.enabled === false) return []; // disabled/absent → this branch does nothing\nconst keywords = cfg.filter((r) => r && r.config_type === 'keyword' && r.enabled !== false)\n  .map((r) => r.value || r.keyword).filter(Boolean);\nconst negatives = cfg.filter((r) => r && r.config_type === 'negative_keyword' && r.enabled !== false)\n  .map((r) => r.value || r.keyword).filter(Boolean);\nconst cur = cursors.find((r) => r && r.source === \"reddit\");\nreturn [{ json: {\n  __target: String(src.target || src.query || src.subreddit || ''),\n  __cursor: cur ? (Number(cur.cursor) || 0) : 0,\n  __keywords: keywords,\n  __negatives: negatives,\n} }];"
+      }
+    },
+    {
+      "id": "reddit-token",
+      "name": "Reddit Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        -240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.reddit.com/api/v1/access_token?grant_type=client_credentials",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "={{ $vars.DIRNOTIF_REDDIT_USER_AGENT || \"studio-dirnotif/1.0\" }}"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "reddit-fetch",
+      "name": "Reddit Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        -240
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://oauth.reddit.com/r/{{ $('Reddit Ctx').item.json.__target }}/new.json?limit=50",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ (($('Reddit Token').item.json.body || {}).access_token) || '' }}"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $vars.DIRNOTIF_REDDIT_USER_AGENT || \"studio-dirnotif/1.0\" }}"
+            }
+          ]
+        }
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "normalize-reddit",
+      "name": "Normalize Reddit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst ctxItems = $(\"Reddit Ctx\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctxItems[i] || ctxItems[0] || { json: {} }).json;\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let posts = [];\n  try { posts = (function (parsed) { const kids = (parsed && parsed.data && parsed.data.children) || [];\nreturn kids.map(function (k) {\n  const d = (k && k.data) || {};\n  return {\n    external_id: d.name || ('t3_' + d.id),\n    url: d.permalink ? ('https://www.reddit.com' + d.permalink) : d.url,\n    title: d.title,\n    body: d.selftext,\n    author: d.author,\n    posted_at: d.created_utc ? new Date(d.created_utc * 1000).toISOString() : null,\n    __cursorVal: Number(d.created_utc) || 0,\n  };\n}); })(parsed) || []; } catch (e) { posts = []; }\n  let maxCursor = Number(c.__cursor) || 0;\n  for (const p of posts) { const cv = Number(p && p.__cursorVal) || 0; if (cv > maxCursor) maxCursor = cv; }\n  for (const p of posts) {\n    if (!p || !p.external_id) continue;\n    const bodyText = String(p.body || '');\n    out.push({ json: {\n      source: \"reddit\",\n      external_id: String(p.external_id),\n      url: p.url || null,\n      title: p.title || null,\n      body: p.body || null,\n      author: p.author || null,\n      posted_at: p.posted_at || null,\n      content_hash: crypto.createHash('sha256').update(bodyText).digest('hex'),\n      __keywords: c.__keywords || [],\n      __negatives: c.__negatives || [],\n      __cursor_source: \"reddit\",\n      __cursor_new: maxCursor,\n    } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "hn-ctx",
+      "name": "HN Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const cfg = [];\nfor (const it of $('Read Config').all()) {\n  const b = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })((it.json || {}).body);\n  if (Array.isArray(b)) cfg.push(...b); else if (b && typeof b === 'object') cfg.push(b);\n}\nconst cursors = [];\nfor (const it of $('Read Cursors').all()) {\n  const b = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })((it.json || {}).body);\n  if (Array.isArray(b)) cursors.push(...b); else if (b && typeof b === 'object') cursors.push(b);\n}\nconst src = cfg.find((r) => r && r.config_type === 'source' && r.value === \"hackernews\");\nif (!src || src.enabled === false) return []; // disabled/absent → this branch does nothing\nconst keywords = cfg.filter((r) => r && r.config_type === 'keyword' && r.enabled !== false)\n  .map((r) => r.value || r.keyword).filter(Boolean);\nconst negatives = cfg.filter((r) => r && r.config_type === 'negative_keyword' && r.enabled !== false)\n  .map((r) => r.value || r.keyword).filter(Boolean);\nconst cur = cursors.find((r) => r && r.source === \"hackernews\");\nreturn [{ json: {\n  __target: String(src.target || src.query || src.subreddit || ''),\n  __cursor: cur ? (Number(cur.cursor) || 0) : 0,\n  __keywords: keywords,\n  __negatives: negatives,\n} }];"
+      }
+    },
+    {
+      "id": "hn-fetch",
+      "name": "HN Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i%3E{{ $('HN Ctx').item.json.__cursor }}&query={{ encodeURIComponent($('HN Ctx').item.json.__target || '') }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "normalize-hn",
+      "name": "Normalize HN",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst ctxItems = $(\"HN Ctx\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctxItems[i] || ctxItems[0] || { json: {} }).json;\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let posts = [];\n  try { posts = (function (parsed) { const hits = (parsed && parsed.hits) || [];\nreturn hits.map(function (h) {\n  return {\n    external_id: h.objectID,\n    url: h.url || ('https://news.ycombinator.com/item?id=' + h.objectID),\n    title: h.title || h.story_title,\n    body: h.story_text || h.comment_text || h.title,\n    author: h.author,\n    posted_at: h.created_at || null,\n    __cursorVal: Number(h.created_at_i) || 0,\n  };\n}); })(parsed) || []; } catch (e) { posts = []; }\n  let maxCursor = Number(c.__cursor) || 0;\n  for (const p of posts) { const cv = Number(p && p.__cursorVal) || 0; if (cv > maxCursor) maxCursor = cv; }\n  for (const p of posts) {\n    if (!p || !p.external_id) continue;\n    const bodyText = String(p.body || '');\n    out.push({ json: {\n      source: \"hackernews\",\n      external_id: String(p.external_id),\n      url: p.url || null,\n      title: p.title || null,\n      body: p.body || null,\n      author: p.author || null,\n      posted_at: p.posted_at || null,\n      content_hash: crypto.createHash('sha256').update(bodyText).digest('hex'),\n      __keywords: c.__keywords || [],\n      __negatives: c.__negatives || [],\n      __cursor_source: \"hackernews\",\n      __cursor_new: maxCursor,\n    } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "forum-ctx",
+      "name": "Forum Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const cfg = [];\nfor (const it of $('Read Config').all()) {\n  const b = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })((it.json || {}).body);\n  if (Array.isArray(b)) cfg.push(...b); else if (b && typeof b === 'object') cfg.push(b);\n}\nconst cursors = [];\nfor (const it of $('Read Cursors').all()) {\n  const b = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })((it.json || {}).body);\n  if (Array.isArray(b)) cursors.push(...b); else if (b && typeof b === 'object') cursors.push(b);\n}\nconst src = cfg.find((r) => r && r.config_type === 'source' && r.value === \"n8n_forum\");\nif (!src || src.enabled === false) return []; // disabled/absent → this branch does nothing\nconst keywords = cfg.filter((r) => r && r.config_type === 'keyword' && r.enabled !== false)\n  .map((r) => r.value || r.keyword).filter(Boolean);\nconst negatives = cfg.filter((r) => r && r.config_type === 'negative_keyword' && r.enabled !== false)\n  .map((r) => r.value || r.keyword).filter(Boolean);\nconst cur = cursors.find((r) => r && r.source === \"n8n_forum\");\nreturn [{ json: {\n  __target: String(src.target || src.query || src.subreddit || ''),\n  __cursor: cur ? (Number(cur.cursor) || 0) : 0,\n  __keywords: keywords,\n  __negatives: negatives,\n} }];"
+      }
+    },
+    {
+      "id": "forum-fetch",
+      "name": "Forum Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        240
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://community.n8n.io/c/{{ $('Forum Ctx').item.json.__target || 'questions' }}/l/latest.json",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "normalize-forum",
+      "name": "Normalize Forum",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst ctxItems = $(\"Forum Ctx\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctxItems[i] || ctxItems[0] || { json: {} }).json;\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let posts = [];\n  try { posts = (function (parsed) { const topics = (parsed && parsed.topic_list && parsed.topic_list.topics) || [];\nreturn topics.map(function (t) {\n  return {\n    external_id: t.id,\n    url: t.slug ? ('https://community.n8n.io/t/' + t.slug + '/' + t.id) : null,\n    title: t.title,\n    body: t.excerpt || t.title,\n    author: t.last_poster_username || null,\n    posted_at: t.created_at || null,\n    __cursorVal: t.created_at ? Date.parse(t.created_at) : (Number(t.id) || 0),\n  };\n}); })(parsed) || []; } catch (e) { posts = []; }\n  let maxCursor = Number(c.__cursor) || 0;\n  for (const p of posts) { const cv = Number(p && p.__cursorVal) || 0; if (cv > maxCursor) maxCursor = cv; }\n  for (const p of posts) {\n    if (!p || !p.external_id) continue;\n    const bodyText = String(p.body || '');\n    out.push({ json: {\n      source: \"n8n_forum\",\n      external_id: String(p.external_id),\n      url: p.url || null,\n      title: p.title || null,\n      body: p.body || null,\n      author: p.author || null,\n      posted_at: p.posted_at || null,\n      content_hash: crypto.createHash('sha256').update(bodyText).digest('hex'),\n      __keywords: c.__keywords || [],\n      __negatives: c.__negatives || [],\n      __cursor_source: \"n8n_forum\",\n      __cursor_new: maxCursor,\n    } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "collect-posts",
+      "name": "Collect Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    },
+    {
+      "id": "advance-cursors",
+      "name": "Advance Cursors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const bySrc = {};\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  if (!j.__cursor_source) continue;\n  const cur = Number(j.__cursor_new) || 0;\n  if (!(j.__cursor_source in bySrc) || cur > bySrc[j.__cursor_source]) bySrc[j.__cursor_source] = cur;\n}\nreturn Object.keys(bySrc).map((s) => ({ json: { source: s, cursor: bySrc[s] } }));"
+      }
+    },
+    {
+      "id": "upsert-cursor",
+      "name": "Upsert Cursor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_cursor?on_conflict=source",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, cursor: $json.cursor, updated_at: new Date().toISOString() }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "filter-keywords",
+      "name": "Filter Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const keywordPreFilter = function keywordPreFilter(lead,opts){const text=(String(lead.title||\"\")+\" \"+String(lead.body||\"\")).toLowerCase();const compact=text.replace(/\\s+/g,\" \").trim();if(!compact||compact.length<(opts.minLength||0)){return{keep:false,coarse:0,matched:[]}}for(const nk of opts.negativeKeywords||[]){const k=String(nk).toLowerCase().trim();if(k&&text.indexOf(k)!==-1)return{keep:false,coarse:0,matched:[\"neg:\"+k]}}const matched=[];let hits=0;for(const kw of opts.keywords||[]){const k=String(kw).toLowerCase().trim();if(k&&text.indexOf(k)!==-1){hits++;matched.push(k)}}const ask=/\\b(help|how do i|how to|looking for|need|recommend|advice|anyone|hire|hiring|freelance|freelancer|consultant|build|developer|agency)\\b/.test(text);const contact=/\\b(dm|email|contact|reach out|reach me|get in touch)\\b/.test(text)||text.indexOf(\"@\")!==-1;if(ask)matched.push(\"ask_verb\");if(contact)matched.push(\"contact\");const keep=hits>0||ask;let coarse=Math.min(hits,3)*15+(ask?20:0)+(contact?15:0);coarse=Math.min(100,coarse);return{keep,coarse,matched}};\nconst MIN = 40;\nconst out = [];\nfor (const it of $input.all()) {\n  const j = it.json;\n  if (!j || !j.external_id) continue; // drop the merge/placeholder empties\n  const r = keywordPreFilter(j, { keywords: j.__keywords || [], negativeKeywords: j.__negatives || [], minLength: MIN });\n  out.push({ json: Object.assign({}, j, { __keep: r.keep, __coarse: r.coarse, __kw_matched: r.matched }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "keyword-gate",
+      "name": "Keyword Gate",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -120
+      ],
+      "parameters": {
+        "filterType": "manual",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "keyword-gate-cond",
+              "leftValue": "={{ $json.__keep === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "drop-filtered",
+      "name": "Drop Filtered",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().filter((it) => it.json && it.json.__keep === true && it.json.external_id != null);"
+      }
+    },
+    {
+      "id": "check-seen",
+      "name": "Check Seen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        -120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_seen?select=content_hash&source=eq.{{ encodeURIComponent($json.source) }}&external_id=eq.{{ encodeURIComponent($json.external_id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "dedupe-gate",
+      "name": "Dedupe Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Drop Filtered').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = [rows];\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const prev = rows[0];\n  const seenUnchanged = !!(prev && prev.content_hash === c.content_hash);\n  out.push({ json: Object.assign({}, c, { __skip: seenUnchanged }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "fresh-gate",
+      "name": "Fresh Gate",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -120
+      ],
+      "parameters": {
+        "filterType": "manual",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fresh-gate-cond",
+              "leftValue": "={{ $json.__skip === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "drop-stopped",
+      "name": "Drop Stopped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().filter((it) => it.json && it.json.__skip === false && it.json.external_id != null);"
+      }
+    },
+    {
+      "id": "upsert-seen",
+      "name": "Upsert Seen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3300,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_seen?on_conflict=source,external_id",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, external_id: $json.external_id, content_hash: $json.content_hash, seen_at: new Date().toISOString() }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "restore-after-seen",
+      "name": "Restore After Seen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Drop Stopped').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "enrichment-bound",
+      "name": "Enrichment Bound?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "enrichment-bound-cond",
+              "leftValue": "={{ (($vars.DIRNOTIF_ENRICHMENT_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "enrich-lead",
+      "name": "Enrich Lead",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3960,
+        -240
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.DIRNOTIF_ENRICHMENT_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "merge-score",
+      "name": "Merge Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        -240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const mergeScore = function mergeScore(base,partial){const KEYS=[\"is_relevant\",\"lead_type\",\"fit_score\",\"intent_score\",\"actionability_score\",\"budget_signal\",\"urgency\",\"category\",\"why\",\"suggested_angle\",\"confidence\"];const out=Object.assign({},base);if(!partial||typeof partial!==\"object\"||partial.enriched!==true){out.__enriched=false;return out}for(const k of KEYS){const cur=out[k];const inc=partial[k];if((cur===null||cur===void 0||cur===\"\")&&inc!==null&&inc!==void 0&&inc!==\"\"){out[k]=inc}}out.__enriched=true;return out};\nconst NULLS = {\n  is_relevant: null, lead_type: null, fit_score: null, intent_score: null,\n  actionability_score: null, budget_signal: null, urgency: null, category: null,\n  why: null, suggested_angle: null, confidence: null, __enriched: false,\n};\nconst ctx = $('Restore After Seen').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const base = Object.assign({}, NULLS, c);\n  out.push({ json: mergeScore(base, p) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-enrichment",
+      "name": "Skip Enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const NULLS = {\n  is_relevant: null, lead_type: null, fit_score: null, intent_score: null,\n  actionability_score: null, budget_signal: null, urgency: null, category: null,\n  why: null, suggested_angle: null, confidence: null, __enriched: false,\n};\nreturn $input.all().map((it) => ({ json: Object.assign({}, NULLS, it.json) }));"
+      }
+    },
+    {
+      "id": "qualify",
+      "name": "Qualify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const __name = (f) => f;\nconst composite = function composite(s){const clamp5=__name(x=>{const n=Number(x);return Number.isFinite(n)?Math.min(5,Math.max(0,n)):0},\"clamp5\");const fit=clamp5(s.fit_score);const intent=clamp5(s.intent_score);const act=clamp5(s.actionability_score);let c=(fit/5*.35+intent/5*.35+act/5*.3)*100;const budgetBonus={none:0,low:2,med:5,high:10}[String(s.budget_signal)]||0;const urgencyBonus={low:0,med:3,high:7}[String(s.urgency)]||0;c+=budgetBonus+urgencyBonus;return Math.max(0,Math.min(100,Math.round(c)))};\nconst qualify = function qualify(input){const DROP_TYPES=[\"showcasing\",\"discussion\",\"off_topic\"];const enriched=input.__enriched===true;if(enriched&&(input.is_relevant===false||DROP_TYPES.indexOf(String(input.lead_type))!==-1)){return{band:\"COLD\",composite_score:0,dropped:true,reason:\"hard_gate:\"+(input.lead_type||\"irrelevant\")}}let score;let reason;if(enriched){score=composite(input);reason=\"enriched composite\"}else{const n=Math.round(Number(input.__coarse));score=Number.isFinite(n)?Math.min(100,Math.max(0,n)):0;reason=\"coarse keyword score (enrichment absent)\"}const band=score>=75?\"HOT\":score>=50?\"WARM\":score>=40?\"REVIEW\":\"COLD\";return{band,composite_score:score,dropped:false,reason}};\nconst out = [];\nfor (const it of $input.all()) {\n  const j = it.json;\n  const v = qualify(j);\n  out.push({ json: Object.assign({}, j, {\n    __band: v.band, __composite: v.composite_score, __dropped: v.dropped, __qualify_reason: v.reason,\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "drop-rejected",
+      "name": "Drop Rejected",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().filter((it) => it.json && it.json.__dropped === false);"
+      }
+    },
+    {
+      "id": "notify-gate",
+      "name": "Notify Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "notify-gate-cond",
+              "leftValue": "={{ String($vars.DIRNOTIF_NOTIFY_ALL) === 'true' || ($json.__band === 'HOT' && $json.__enriched === true && Number($json.confidence || 0) >= 0.6) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "compose-ping",
+      "name": "Compose Ping",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        -240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const j = it.json;\n  const snippet = String(j.body || j.title || '').replace(/\\s+/g, ' ').trim().slice(0, 240);\n  const header = '[' + j.__band + ' ' + j.__composite + '] ' + (j.source || '') + ' · ' + (j.category || 'lead');\n  const why = j.why ? ('\\n' + j.why) : '';\n  const angle = j.suggested_angle ? ('\\nAngle: ' + j.suggested_angle) : '';\n  const link = j.url ? ('\\n' + j.url) : '';\n  const text = header + why + angle + (snippet ? ('\\n\"' + snippet + '\"') : '') + link;\n  const id = String(j.external_id || '').slice(0, 48);\n  const payload = {\n    text: text,\n    disable_web_page_preview: false,\n    reply_markup: { inline_keyboard: [[\n      { text: '✅ Attended', callback_data: 'att:' + id },\n      { text: '⏳ Deferred', callback_data: 'def:' + id },\n      { text: '🔕 Mute', callback_data: 'mute:' + id },\n    ]] },\n  };\n  out.push({ json: Object.assign({}, j, { __tg_payload: payload }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-telegram",
+      "name": "Notify Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        5280,
+        -240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.DIRNOTIF_TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ chat_id: $vars.DIRNOTIF_TELEGRAM_CHAT_ID }, $json.__tg_payload)) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "stamp-notified",
+      "name": "Stamp Notified",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        -240
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compose Ping').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  out.push({ json: Object.assign({}, c, { __notified_at: (status >= 200 && status < 300) ? new Date().toISOString() : null }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "stamp-not-notified",
+      "name": "Stamp Not Notified",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: Object.assign({}, it.json, { __notified_at: null }) }));"
+      }
+    },
+    {
+      "id": "telemetry-upsert",
+      "name": "Telemetry Upsert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        5500,
+        -60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/dirnotif_qualified?on_conflict=source,external_id",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, external_id: $json.external_id, url: $json.url, title: $json.title, fit_score: $json.fit_score, intent_score: $json.intent_score, actionability_score: $json.actionability_score, budget_signal: $json.budget_signal, urgency: $json.urgency, coarse_score: $json.__coarse, composite_score: $json.__composite, band: $json.__band, category: $json.category, why: $json.why, suggested_angle: $json.suggested_angle, confidence: $json.confidence, status: \"new\", notified_at: $json.__notified_at }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Poll": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Read Cursors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Cursors": {
+      "main": [
+        [
+          {
+            "node": "Reddit Ctx",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HN Ctx",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Forum Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reddit Ctx": {
+      "main": [
+        [
+          {
+            "node": "Reddit Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reddit Token": {
+      "main": [
+        [
+          {
+            "node": "Reddit Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reddit Fetch": {
+      "main": [
+        [
+          {
+            "node": "Normalize Reddit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HN Ctx": {
+      "main": [
+        [
+          {
+            "node": "HN Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HN Fetch": {
+      "main": [
+        [
+          {
+            "node": "Normalize HN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forum Ctx": {
+      "main": [
+        [
+          {
+            "node": "Forum Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forum Fetch": {
+      "main": [
+        [
+          {
+            "node": "Normalize Forum",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Reddit": {
+      "main": [
+        [
+          {
+            "node": "Collect Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize HN": {
+      "main": [
+        [
+          {
+            "node": "Collect Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Forum": {
+      "main": [
+        [
+          {
+            "node": "Collect Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Posts": {
+      "main": [
+        [
+          {
+            "node": "Advance Cursors",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Advance Cursors": {
+      "main": [
+        [
+          {
+            "node": "Upsert Cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Keywords": {
+      "main": [
+        [
+          {
+            "node": "Keyword Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keyword Gate": {
+      "main": [
+        [
+          {
+            "node": "Drop Filtered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drop Filtered": {
+      "main": [
+        [
+          {
+            "node": "Check Seen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Seen": {
+      "main": [
+        [
+          {
+            "node": "Dedupe Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedupe Gate": {
+      "main": [
+        [
+          {
+            "node": "Fresh Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fresh Gate": {
+      "main": [
+        [
+          {
+            "node": "Drop Stopped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drop Stopped": {
+      "main": [
+        [
+          {
+            "node": "Upsert Seen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Seen": {
+      "main": [
+        [
+          {
+            "node": "Restore After Seen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore After Seen": {
+      "main": [
+        [
+          {
+            "node": "Enrichment Bound?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrichment Bound?": {
+      "main": [
+        [
+          {
+            "node": "Enrich Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Lead": {
+      "main": [
+        [
+          {
+            "node": "Merge Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Score": {
+      "main": [
+        [
+          {
+            "node": "Qualify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Qualify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualify": {
+      "main": [
+        [
+          {
+            "node": "Drop Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drop Rejected": {
+      "main": [
+        [
+          {
+            "node": "Notify Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Gate": {
+      "main": [
+        [
+          {
+            "node": "Compose Ping",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stamp Not Notified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Ping": {
+      "main": [
+        [
+          {
+            "node": "Notify Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Telegram": {
+      "main": [
+        [
+          {
+            "node": "Stamp Notified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp Notified": {
+      "main": [
+        [
+          {
+            "node": "Telemetry Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp Not Notified": {
+      "main": [
+        [
+          {
+            "node": "Telemetry Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
