@@ -42,6 +42,21 @@ when a template is instantiated for a specific job.
 | [`workflows/shopify-webhook-reread.json`](workflows/shopify-webhook-reread.json) | Shopify Webhook → Re-read/Invalidate | Shopify HMAC verify (base64) → live re-read / cache invalidate → respond. **Never mirrors** order/stock/payment state. |
 | [`workflows/sms-state-machine.json`](workflows/sms-state-machine.json) | SMS/WhatsApp State Machine | inbound → STOP/dedupe guards → identity/session lookup → AI decision → outbound + provider flag. (`[SCARLET]` lineage.) |
 
+## `dirnotif_plugin/` — Community Lead Radar (case-study brick family)
+
+A composable plugin family (base brick + fail-open add-ons) that watches public
+communities, keyword-pre-filters, LLM-qualifies, and notifies — automated
+**detection**, human **response**. Grouped in its own subfolder because it ships
+as a family. Provisioned to `PACKAGE/Templates` (`IKEgTeej0upY4GVP`); exported
+here as importable, credential-slot template snapshots (inactive).
+
+| File | Template | Pattern |
+|------|----------|---------|
+| [`dirnotif_plugin/scraper.json`](dirnotif_plugin/scraper.json) | Community Lead Radar — Scraper (**base brick**) | schedule → read config + per-source cursors → official-API poll (HN Algolia / n8n forum / Reddit) → normalise → keyword pre-filter → dedupe (seen + cursor) → `executeWorkflow` enrichment seam → deterministic band/score → fail-quiet notify gate (all-bands via `DIRNOTIF_NOTIFY_ALL`, else HOT-only) → Telegram + telemetry upsert. |
+| [`dirnotif_plugin/enrichment.json`](dirnotif_plugin/enrichment.json) | Lead Enrichment — LLM Add-on (**fail-open child**) | `executeWorkflow` child: structured-output LLM qualify (fit/intent/actionability + budget/urgency) with schema validation + spend guard; merged over nulls into the lead record. |
+| [`dirnotif_plugin/digest.json`](dirnotif_plugin/digest.json) | Daily Digest — Agentic Email Add-on | cron → select prior-day qualified leads → compose → Resend `/emails` → own send-log table (idempotent per digest date). Never live-pings. |
+| [`dirnotif_plugin/feedback.json`](dirnotif_plugin/feedback.json) | Feedback Receiver — Telegram callback | webhook → dual-auth (studio HMAC canary **or** Telegram `X-Telegram-Bot-Api-Secret-Token`) → 401 gate → Attended/Deferred/Mute → write `dirnotif_qualified` / `dirnotif_config` + `answerCallbackQuery`. |
+
 ## Conventions baked into every template
 
 - **Signing.** Default to the studio HMAC form — `HMAC(${ts}.${body})` with

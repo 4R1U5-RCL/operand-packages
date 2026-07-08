@@ -93,6 +93,12 @@ project; this dir is the published, importable snapshot. See
 | [`shopify-webhook-reread`](n8n/workflows/shopify-webhook-reread.json) | Shopify HMAC verify → live re-read / cache invalidate → respond. **Never mirrors** commercial state. |
 | [`sms-state-machine`](n8n/workflows/sms-state-machine.json) | inbound → STOP/dedupe guards → identity/session lookup → AI decision → outbound + provider flag. |
 
+Plugin families ship in their own subfolder (base brick + fail-open add-ons):
+
+| Family | Workflows |
+|--------|-----------|
+| [`dirnotif_plugin/`](n8n/dirnotif_plugin/) — Community Lead Radar | `scraper` (base brick) · `enrichment` (LLM child) · `digest` (agentic email) · `feedback` (Telegram callback). Automated detection, human response. |
+
 ## `supabase/` — schema templates
 
 Reusable Supabase **schema templates** — one idempotent RLS migration per
