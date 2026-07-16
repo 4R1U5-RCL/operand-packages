@@ -148,7 +148,7 @@ const fixture = JSON.parse(
 
 // Markers of the HOSTED recurring IP that must never appear in THIS package's
 // own source. The scrape pipeline, the schedule, and the structuring/LLM step
-// all run on csco.app.n8n.cloud — never in the client repo.
+// all run on <studio-n8n-host> — never in the client repo.
 const FORBIDDEN = [
   /\bfirecrawl\b/i,
   /\bopenrouter\b/i,

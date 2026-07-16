@@ -56,7 +56,7 @@ Put the secret where the hook can read it (outside any committed file):
 
 ```bash
 # ~/.claude/notify.env   (chmod 600)
-NOTIFY_WEBHOOK_URL=https://csco.app.n8n.cloud/webhook/studio-notify
+NOTIFY_WEBHOOK_URL=https://<studio-n8n-host>/webhook/studio-notify
 NOTIFY_TOKEN=<secret>
 NOTIFY_ON_STOP=1     # optional — also ping on completion (off = attention only)
 ```

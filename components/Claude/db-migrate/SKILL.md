@@ -17,7 +17,7 @@ an `sbp_…` Personal Access Token. This skill encodes that path, then verifies 
 landed AND that every new table has RLS enabled (a new table without RLS is a hard finding
 per `packages/db/CLAUDE.md`).
 
-Studio reference project: `studio/templates` = ref `uzedswjxbgiuymleteud` (the dormant
+Studio reference project: `studio/templates` = ref `<SUPABASE_TEMPLATES_REF redacted>` (the dormant
 RLS/template project). Use the explicit `--project=<ref>` for any other target — never
 invent a ref.
 
@@ -38,7 +38,7 @@ invent a ref.
 - **Project ref:** take it from `--project=<ref>`. If omitted and the cwd is a studio
   client, read the ref from that client's config (`client.config.ts` / `.env`
   `SUPABASE_PROJECT_REF` or the project URL `https://<ref>.supabase.co`). For the
-  template project the ref is `uzedswjxbgiuymleteud`. Do not guess — if no real ref
+  template project the ref is `<SUPABASE_TEMPLATES_REF redacted>`. Do not guess — if no real ref
   resolves, stop and ask.
 - **Migration SQL:** the argument is either an inline SQL string or a path. If it's a
   path, `Read` it. If it's a directory of migrations, enumerate `*.sql` in lexical
@@ -163,7 +163,7 @@ Next: <fix RLS / re-run / done>
 - The PAT (`SUPABASE_ACCESS_TOKEN`, `sbp_…`) is read from env, never printed, never written
   to a doc, never accepted via plaintext chat (PAT-6/PAT-11). Treat any exposed token as
   burned and rotate.
-- Project ref must be a real resolved value (e.g. `uzedswjxbgiuymleteud` for
+- Project ref must be a real resolved value (e.g. `<SUPABASE_TEMPLATES_REF redacted>` for
   studio/templates) — never invented.
 - Every new table must end RLS-enabled and policied — verify it, don't assume it. A new
   table without RLS is a hard finding, not a pass.
@@ -174,7 +174,7 @@ Next: <fix RLS / re-run / done>
 
 - Endpoint: `POST https://api.supabase.com/v1/projects/{ref}/database/query`, header
   `Authorization: Bearer sbp_…`, body `{"query": "<SQL>"}`.
-- studio/templates project ref: `uzedswjxbgiuymleteud`.
+- studio/templates project ref: `<SUPABASE_TEMPLATES_REF redacted>`.
 - PAT-5 (Postgres unreachable → Management-API path): `/studio/ERRORS_AND_FINDINGS.md`.
 - RLS-by-default + §8.1 shapes: `/studio/CLAUDE.md` → `packages/db`.
 - Cross-surface RLS re-audit (the loop-closer): `~/packages/audit/` (`rls`/`revoke`).

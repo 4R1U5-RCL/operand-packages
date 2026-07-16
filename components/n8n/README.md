@@ -23,7 +23,7 @@ placeholders. Binding credentials and activating is a deliberate human/ops step
 when a template is instantiated for a specific job.
 
 > Source of truth: exported from the hosted `PACKAGE/Templates` n8n project
-> (`IKEgTeej0upY4GVP`). Authored as code in the studio monorepo
+> (`<N8N_TEMPLATES_PROJECT_ID redacted>`). Authored as code in the studio monorepo
 > (`@studio/n8n-templates` primitives + `clients/_n8n-templates/builders/`) and
 > built/verified/provisioned through the harness `n8n-template` app-class — never
 > hand-drawn. This dir is the published, importable snapshot.

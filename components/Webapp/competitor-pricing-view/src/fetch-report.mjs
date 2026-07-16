@@ -3,7 +3,7 @@
 // This file shapes and formats the LATEST competitor-pricing report that the
 // hosted read endpoint hands back. It does NOT produce that report. The scrape,
 // the schedule, and the structuring/LLM step all run on the studio's hosted n8n
-// instance (csco.app.n8n.cloud) — see CLAUDE.md and docs/boundary.md. Nothing in
+// instance (<studio-n8n-host>) — see CLAUDE.md and docs/boundary.md. Nothing in
 // here fetches the web, runs a crawl, or calls a model.
 //
 // Two responsibilities, both display-only:

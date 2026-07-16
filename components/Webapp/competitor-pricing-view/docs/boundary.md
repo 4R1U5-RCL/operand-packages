@@ -10,7 +10,7 @@ finished report. This is the `packages/integrations` recurring boundary
 
 | Concern | Lives where | In this package? |
 |---|---|---|
-| Firecrawl scrapers (fetching competitor pages) | **Hosted — csco.app.n8n.cloud** | ❌ never |
+| Firecrawl scrapers (fetching competitor pages) | **Hosted — <studio-n8n-host>** | ❌ never |
 | The schedule / cron that runs the scrape | **Hosted — n8n workflow** | ❌ never |
 | Structuring / LLM step that turns raw pages → a report (OpenRouter etc.) | **Hosted — n8n workflow** | ❌ never |
 | Storage of historical report snapshots | **Hosted** (derived history; the client reads the latest) | ❌ never |

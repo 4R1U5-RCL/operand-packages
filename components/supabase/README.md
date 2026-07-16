@@ -20,7 +20,7 @@ the `public` schema with no client values and no secrets. Every template is
 `create policy`) so it re-applies cleanly.
 
 > Source of truth: applied to the studio's `studio/templates` Supabase project
-> (ref `uzedswjxbgiuymleteud`). Authored as code in the studio monorepo
+> (ref `<SUPABASE_TEMPLATES_REF redacted>`). Authored as code in the studio monorepo
 > (`@studio/supabase-templates` primitives + `clients/_supabase-templates/sql/`
 > builders) and built/verified/provisioned through the harness `supabase-template`
 > app-class — never hand-written. This dir is the published, importable snapshot.
