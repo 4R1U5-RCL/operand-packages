@@ -1,0 +1,729 @@
+{
+  "name": "[TEMPLATE] [seo_improver_plugin] SEO Improver — DataForSEO → movement → heuristics → notify",
+  "nodes": [
+    {
+      "id": "every-week",
+      "name": "Every Week",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "confirm-config",
+      "name": "Confirm Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\nconst property = safe(() => ($vars.SEO_TARGET_DOMAIN));\nconst locale = safe(() => (($vars.SEO_LOCATION_NAME || 'United States'))) || 'default';\nconst device = safe(() => (($vars.SEO_DEVICE || 'desktop'))) || 'all';\nconst DAY = 86400000;\nconst now = Date.now();\n// UTC day-aligned run anchor (the snapshot/period-end day) + the prior-run anchor (WoW).\nconst runMs = new Date(new Date(now).setUTCHours(0, 0, 0, 0)).getTime();\nconst priorMs = runMs - 7 * DAY;\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nreturn [{ json: {\n  __tenant: tenant,\n  __property: property,\n  __locale: locale,\n  __device: device,\n  __run_date: day(runMs),\n  __prior_run_date: day(priorMs),\n} }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "spend-read",
+      "name": "Spend Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/global_send_quotas?select=spend_usd,count&channel=eq.dataforseo&sender_id=eq.dataforseo-daily&window_start=eq.{{ encodeURIComponent(new Date().toISOString().slice(0,10)) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "spend-gate",
+      "name": "Spend Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"SEO_DATAFORSEO_DAILY_CAP\"));\nconst ctx = $('Confirm Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const row = rows[0] || {};\n  const spent = Number(row.spend_usd != null ? row.spend_usd : (row.count != null ? row.count : 0)) || 0;\n  // No cap configured → do not block (fail-open); a finite cap gates at the boundary.\n  const under = !Number.isFinite(CAP) || CAP <= 0 ? true : spent < CAP;\n  out.push({ json: Object.assign({}, c, { __spend_under_cap: under }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "pull",
+      "name": "Pull?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pull-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "skip-pull",
+      "name": "Skip Pull",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: Object.assign({}, it.json, {\n  __facts_ok: false,\n  __facts_reason: 'dataforseo_spend_cap',\n  __this_run: [],\n}) }));"
+      }
+    },
+    {
+      "id": "dataforseo-pull",
+      "name": "DataForSEO Pull",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/ranked_keywords/live",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ target: $json.__property, location_name: $json.__locale, language_name: 'English', item_types: ['organic'], limit: 100, order_by: ['ranked_serp_element.serp_item.rank_absolute,asc'] }]) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cred-ref:dataforseo",
+          "name": "[OPERAND] DataForSEO Basic"
+        }
+      }
+    },
+    {
+      "id": "extract-rankings",
+      "name": "Extract Rankings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Confirm Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let factsOk = false;\n  let reason = null;\n  let rows = [];\n  if (status === 401 || status === 403) { reason = 'dataforseo_unauthorized'; }\n  else if (status < 200 || status >= 300) { reason = 'dataforseo_error_' + (status || 'unknown'); }\n  else if (!parsed || !Array.isArray(parsed.tasks)) { reason = 'dataforseo_unparseable'; }\n  else {\n    // A per-task status_code other than 20000 is a DataForSEO-level error even on HTTP 200.\n    const task = parsed.tasks[0] || {};\n    const taskStatus = Number(task.status_code || 0);\n    const result = Array.isArray(task.result) ? task.result[0] : null;\n    const list = result && Array.isArray(result.items) ? result.items : null;\n    if (taskStatus && taskStatus !== 20000) { reason = 'dataforseo_task_' + taskStatus; }\n    else if (!list) { reason = 'dataforseo_empty'; }\n    else {\n      for (const it of list) {\n        if (!it || typeof it !== 'object') continue;\n        const kwData = it.keyword_data || {};\n        const kw = (kwData.keyword != null) ? String(kwData.keyword) : null;\n        const serp = it.ranked_serp_element || {};\n        const el = serp.serp_item || {};\n        const pos = Number(el.rank_absolute);\n        if (!kw || !Number.isFinite(pos)) continue; // ignore rows without a finite position\n        const kwInfo = kwData.keyword_info || {};\n        const vol = Number.isFinite(Number(kwInfo.search_volume)) ? Number(kwInfo.search_volume) : null;\n        rows.push({\n          keyword: kw,\n          ranking_url: el.url != null ? String(el.url) : null,\n          position: pos,\n          search_volume: vol,\n          locale: c.__locale,\n          device: c.__device,\n        });\n      }\n      factsOk = rows.length > 0;\n      if (!factsOk) reason = 'dataforseo_no_rows';\n    }\n  }\n  out.push({ json: Object.assign({}, c, {\n    __facts_ok: factsOk,\n    __facts_reason: reason,\n    __this_run: rows,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-prior",
+      "name": "Read Prior",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1540,
+        -80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_rank_snapshots?select=keyword,locale,device,position,ranking_url&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&run_date=eq.{{ encodeURIComponent($json.__prior_run_date) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "compute-movement",
+      "name": "Compute Movement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Extract Rankings').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let prior = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(prior)) prior = prior ? [prior] : [];\n  const priorByKey = {};\n  for (const r of prior) {\n    if (!r || r.keyword == null) continue;\n    priorByKey[String(r.keyword) + '|' + (r.locale || 'default') + '|' + (r.device || 'all')] = r;\n  }\n  const thisRun = Array.isArray(c.__this_run) ? c.__this_run : [];\n  const rows = thisRun.map((row) => {\n    const key = row.keyword + '|' + (row.locale || 'default') + '|' + (row.device || 'all');\n    const prev = priorByKey[key];\n    const prevPos = prev && Number.isFinite(Number(prev.position)) ? Number(prev.position) : null;\n    const pos = Number(row.position);\n    let status = 'flat';\n    let delta = null;\n    if (prevPos === null) status = 'new';\n    else {\n      delta = Math.round((prevPos - pos) * 10) / 10; // + = moved toward #1\n      if (pos > 100) status = 'dropped';\n      else if (delta > 0.5) status = 'gained';\n      else if (delta < -0.5) status = 'lost';\n      else status = 'flat';\n    }\n    return Object.assign({}, row, { previous_position: prevPos, delta: delta, status: status });\n  });\n  out.push({ json: Object.assign({}, c, { __movement: rows }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "run-heuristics",
+      "name": "Run Heuristics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nfunction fid(cls, kw, url) { return cls + '-' + String(hash(cls + '|' + (kw || '') + '|' + (url || '')) % 1000).padStart(3, '0'); }\nconst STRIKE_MIN = 4, STRIKE_MAX = 20, DECAY_DROP = 3;\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const rows = Array.isArray(j.__movement) ? j.__movement : [];\n  const findings = [];\n  // Cannibalization: group own ranking URLs per keyword.\n  const urlsByKw = {};\n  for (const r of rows) {\n    const kw = r.keyword;\n    if (!kw) continue;\n    if (r.ranking_url) { (urlsByKw[kw] = urlsByKw[kw] || new Set()).add(r.ranking_url); }\n  }\n  for (const r of rows) {\n    const kw = r.keyword, url = r.ranking_url || null, pos = Number(r.position);\n    if (!kw || !Number.isFinite(pos)) continue;\n    // SEO-STRIKE — striking distance.\n    if (pos >= STRIKE_MIN && pos <= STRIKE_MAX) {\n      findings.push({ finding_id: fid('SEO-STRIKE', kw, url), class: 'SEO-STRIKE', target_keyword: kw, target_url: url,\n        evidence: { position: pos, previous_position: r.previous_position, delta: r.delta, search_volume: r.search_volume, locale: r.locale, device: r.device } });\n    }\n    // SEO-DECAY — position fell vs prior beyond the threshold.\n    if (r.delta !== null && r.delta !== undefined && Number(r.delta) <= -DECAY_DROP) {\n      findings.push({ finding_id: fid('SEO-DECAY', kw, url), class: 'SEO-DECAY', target_keyword: kw, target_url: url,\n        evidence: { position: pos, previous_position: r.previous_position, delta: r.delta, search_volume: r.search_volume, locale: r.locale, device: r.device } });\n    }\n  }\n  // SEO-CANN — ≥2 of the site's own URLs ranking for one keyword.\n  for (const kw of Object.keys(urlsByKw)) {\n    const urls = Array.from(urlsByKw[kw]);\n    if (urls.length >= 2) {\n      findings.push({ finding_id: fid('SEO-CANN', kw, ''), class: 'SEO-CANN', target_keyword: kw, target_url: urls[0],\n        evidence: { competing_urls: urls, count: urls.length } });\n    }\n  }\n  // NOTE: SEO-CTR (high-impressions/low-CTR) is DEFERRED — it requires GSC first-party\n  // clicks/impressions/CTR which DataForSEO does not supply. Not emitted in v1.\n  out.push({ json: Object.assign({}, j, { __findings: findings }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "draft",
+      "name": "Draft?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "draft-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_DRAFT_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "draft-changes",
+      "name": "Draft Changes",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2420,
+        -160
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_DRAFT_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach-drafts",
+      "name": "Attach Drafts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Run Heuristics').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const drafts = (p && typeof p === 'object' && p.drafts && typeof p.drafts === 'object') ? p.drafts : {};\n  const findings = (Array.isArray(c.__findings) ? c.__findings : []).map((f) => {\n    const cand = drafts[f.finding_id];\n    const rec = (typeof cand === 'string' && cand.trim()) ? cand.trim().slice(0, 600) : null;\n    return Object.assign({}, f, { recommendation: rec });\n  });\n  out.push({ json: Object.assign({}, c, { __findings: findings }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-drafts",
+      "name": "Skip Drafts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const findings = (Array.isArray(j.__findings) ? j.__findings : []).map((f) => Object.assign({}, f, { recommendation: null }));\n  return { json: Object.assign({}, j, { __findings: findings }) };\n});"
+      }
+    },
+    {
+      "id": "loop-check",
+      "name": "Loop Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const movement = Array.isArray(j.__movement) ? j.__movement : [];\n  const posByKw = {};\n  for (const r of movement) { if (r.keyword != null) posByKw[String(r.keyword)] = Number(r.position); }\n  // Prior OPEN findings arrive on the item as __prior_findings (attached by Read Prior\n  // Findings). For each, derive the outcome from the current position vs the stored one.\n  const prior = Array.isArray(j.__prior_findings) ? j.__prior_findings : [];\n  const outcomes = prior.map((pf) => {\n    const before = Number(pf.outcome_position_after != null ? pf.outcome_position_after : (pf.evidence && pf.evidence.position));\n    const after = posByKw[String(pf.target_keyword)];\n    let verdict = null;\n    if (Number.isFinite(before) && Number.isFinite(after)) {\n      if (after < before - 0.5) verdict = 'worked';\n      else if (after > before + 0.5) verdict = 'regressed';\n      else verdict = 'no_change';\n    }\n    return { finding_id: pf.finding_id, outcome_position_before: Number.isFinite(before) ? before : null,\n      outcome_position_after: Number.isFinite(after) ? after : null, outcome_verdict: verdict };\n  });\n  out.push({ json: Object.assign({}, j, { __loop_outcomes: outcomes }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-snapshots",
+      "name": "Write Snapshots",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3080,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_rank_snapshots?on_conflict=tenant,keyword,locale,device,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__movement || []).map((r) => ({ tenant: $json.__tenant, property: $json.__property, run_date: $json.__run_date, keyword: r.keyword, locale: r.locale, device: r.device, ranking_url: r.ranking_url, position: r.position, previous_position: r.previous_position, delta: r.delta, avg_position: r.position, status: r.status }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "write-findings",
+      "name": "Write Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3300,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_findings?on_conflict=tenant,finding_id",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__findings || []).map((f) => ({ tenant: $json.__tenant, finding_id: f.finding_id, class: f.class, target_keyword: f.target_keyword, target_url: f.target_url, recommendation: f.recommendation, evidence: f.evidence, created_run: $json.__run_date, status: \"open\", updated_at: new Date().toISOString() }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const movement = Array.isArray(j.__movement) ? j.__movement : [];\n  const findings = Array.isArray(j.__findings) ? j.__findings : [];\n  const factsOk = j.__facts_ok === true;\n  let message;\n  if (!factsOk) {\n    const why = j.__facts_reason ? (' (' + j.__facts_reason + ')') : '';\n    message = '🔍 SEO improver — no ranking data could be read for this run' + why +\n      '. No figures are shown because none were returned from DataForSEO.';\n  } else {\n    const gained = movement.filter((r) => r.status === 'gained').length;\n    const lost = movement.filter((r) => r.status === 'lost' || r.status === 'dropped').length;\n    const strike = findings.filter((f) => f.class === 'SEO-STRIKE').length;\n    const top = findings[0];\n    const action = top ? (top.recommendation || (top.class + ' — ' + top.target_keyword)) : 'no action this run';\n    message = '🔍 SEO improver — ' + gained + ' up / ' + lost + ' down; ' + findings.length +\n      ' open findings (' + strike + ' striking-distance). Top action: ' + String(action).slice(0, 300);\n  }\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'seo_improver',\n    tenant: j.__tenant || null,\n    run_date: j.__run_date || null,\n    facts_ok: factsOk,\n    open_findings: findings.length,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3740,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Every Week": {
+      "main": [
+        [
+          {
+            "node": "Confirm Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Config": {
+      "main": [
+        [
+          {
+            "node": "Spend Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Read": {
+      "main": [
+        [
+          {
+            "node": "Spend Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Gate": {
+      "main": [
+        [
+          {
+            "node": "Pull?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull?": {
+      "main": [
+        [
+          {
+            "node": "DataForSEO Pull",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Pull",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DataForSEO Pull": {
+      "main": [
+        [
+          {
+            "node": "Extract Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Pull": {
+      "main": [
+        [
+          {
+            "node": "Read Prior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Rankings": {
+      "main": [
+        [
+          {
+            "node": "Read Prior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Prior": {
+      "main": [
+        [
+          {
+            "node": "Compute Movement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Movement": {
+      "main": [
+        [
+          {
+            "node": "Run Heuristics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Heuristics": {
+      "main": [
+        [
+          {
+            "node": "Draft?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft?": {
+      "main": [
+        [
+          {
+            "node": "Draft Changes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Changes": {
+      "main": [
+        [
+          {
+            "node": "Attach Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Drafts": {
+      "main": [
+        [
+          {
+            "node": "Loop Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Drafts": {
+      "main": [
+        [
+          {
+            "node": "Loop Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Check": {
+      "main": [
+        [
+          {
+            "node": "Write Snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Snapshots": {
+      "main": [
+        [
+          {
+            "node": "Write Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Findings": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}

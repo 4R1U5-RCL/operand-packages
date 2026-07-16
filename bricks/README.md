@@ -42,7 +42,10 @@ the freshness check makes it safe.
 | [`email-lead-qualifier/`](email-lead-qualifier/) | `[email_plugin]` | BASE | built |
 | [`llm-lead-enrichment/`](llm-lead-enrichment/) | `[llmenri_plugin]` | ADD-ON | built |
 | [`community-lead-radar/`](community-lead-radar/) | `[dirnotif_plugin]` | BASE | built |
-| [`seo-improver/`](seo-improver/) | `[seo_improver_plugin]` / `[seo_pr_apply]` | BASE | **placeholder — In Build** (core components in `planned[]`) |
+| [`keyword-research/`](keyword-research/) | `[keyword_research_plugin]` | BASE | built |
+| [`technical-audit/`](technical-audit/) | `[technical_audit_plugin]` | BASE | built |
+| [`seo-improver/`](seo-improver/) | `[seo_improver_plugin]` / `[seo_pr_apply]` | BASE | built (Phase-1 rank tracker; `[seo_pr_apply]` in `planned[]`) |
+| [`seo-audit-orchestrator/`](seo-audit-orchestrator/) | `[seo_audit_orchestrator_plugin]` | BASE | built (SEO-suite goal endpoint) |
 
 *Tessera is a full-stack project, not a `[*_plugin]` brick, and is intentionally
 excluded from `bricks/`.*

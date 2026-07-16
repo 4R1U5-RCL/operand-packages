@@ -1,0 +1,858 @@
+{
+  "name": "[TEMPLATE] [seo_audit_orchestrator_plugin] SEO Audit Orchestrator — compose bricks → dedup → prioritize → work-queue → notify",
+  "nodes": [
+    {
+      "id": "audit-webhook",
+      "name": "Audit Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seo-audit-orchestrator",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "verify-hmac",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst MAX_SKEW_MS = 300000;\nconst SIG_HEADER = \"x-n8n-signature\";\nconst TS_HEADER = \"x-n8n-timestamp\";\nconst STATIC_HEADER = \"x-static-token\";\nconst hmac = (d) => crypto.createHmac('sha256', SECRET).update(d).digest('hex');\nconst safeEq = (aHex, bHex) => {\n  if (!aHex || !bHex) return false;\n  const a = Buffer.from(String(aHex)), b = Buffer.from(String(bHex));\n  return a.length === b.length && crypto.timingSafeEqual(a, b);\n};\n// TE-16: recover the EXACT signed bytes — rawBody when n8n captured it, else a\n// careful re-stringify of the parsed body (must round-trip byte-identical).\nconst rawOf = (j) => (j.rawBody != null) ? j.rawBody.toString() : JSON.stringify(j.body);\n\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const headers = j.headers || {};\n  const raw = rawOf(j);\n  let ok = false;\n  // Fail-closed: an unconfigured secret can never verify (and never throws).\n  if (SECRET) {\n  const sig = headers[SIG_HEADER];\n  const ts = headers[TS_HEADER];\n  if (ts) {\n    // timestamp PRESENT -> studio form: replay-guarded HMAC(`${ts}.${body}`).\n    const n = Number(ts);\n    if (sig && Number.isFinite(n) && Math.abs(Date.now() - n) <= MAX_SKEW_MS) {\n      ok = safeEq(hmac(ts + '.' + raw), sig);\n    }\n  } else {\n    // timestamp ABSENT -> harness verify-n8n form: bare-body HMAC(`${body}`),\n    // only the signature header present.\n    ok = safeEq(hmac(raw), sig);\n  }\n  }\n  // n8n Cloud freezes Code-node input items (IN-25): in-place mutations are\n  // silently dropped — always RETURN new items.\n  const item = { json: Object.assign({}, j, { __authok: ok }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "auth-gate",
+      "name": "Auth Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "auth-gate-cond",
+              "leftValue": "={{ $json.__authok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "reject-401",
+      "name": "Reject 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"invalid or missing signature\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "sign-ack",
+      "name": "Sign Ack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const requestId = (j.body && j.body.request_id) || j.request_id || null;\n  const body = { ok: true, request_id: requestId };\n  const payload = JSON.stringify(body);\n  // n8n Cloud freezes Code-node input items (IN-25): in-place writes are silently\n  // dropped, so the respond node would read an item WITHOUT __sig and answer\n  // unsigned. Always RETURN a NEW item carrying the signing fields (and binary).\n  // Fail-open to UNSIGNED when the secret is unreachable — empty __sig rather than\n  // throw or sign with an empty key.\n  const item = { json: Object.assign({}, j, {\n    __body: body,\n    __ts: String(Date.now()),\n    __sig: SECRET ? crypto.createHmac('sha256', SECRET).update(payload).digest('hex') : '',\n  }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "ack-202-signed",
+      "name": "Ack 202 Signed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        -40
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.__body }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "x-n8n-signature",
+                "value": "={{ $json.__sig }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nfunction toList(s) { return String(s || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean); }\nconst ALL = ['keyword_research', 'technical_audit', 'rank_tracker'];\nconst items = $input.all();\nconst src = (items[0] && items[0].json) || {};\nconst body = (src.body && typeof src.body === 'object') ? src.body : src;\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\nlet target = safe(() => ($vars.SEO_TARGET_DOMAIN));\nif (body && body.target) { const bt = safe(() => body.target); if (bt) target = bt; }\n// Which children to include: $vars CSV, optionally overridden by the on-demand body.\nlet include = toList(safe(() => (($vars.SEO_AUDIT_INCLUDE || 'keyword_research,technical_audit,rank_tracker'))));\nif (body && body.include) { const b = Array.isArray(body.include) ? body.include.join(',') : body.include; const bl = toList(b); if (bl.length) include = bl; }\nif (!include.length) include = ALL.slice();\n// Only keep recognised child keys (ignore junk from the body).\ninclude = include.filter((k) => ALL.indexOf(k) !== -1);\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nconst runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\n// Seed child_status: everything not included is 'excluded' up front (honest baseline).\nconst childStatus = {};\nfor (const k of ALL) childStatus[k] = include.indexOf(k) !== -1 ? 'pending' : 'excluded';\nreturn [{ json: Object.assign({}, src, {\n  __tenant: tenant,\n  __target: target,\n  __run_date: day(runMs),\n  __include: include,\n  __child_status: childStatus,\n}) }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "dispatch-keyword-research",
+      "name": "Dispatch Keyword Research",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_KEYWORD_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dispatch-technical-audit",
+      "name": "Dispatch Technical Audit",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_TECHNICAL_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dispatch-rank-tracker",
+      "name": "Dispatch Rank Tracker",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_RANK_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "read-keyword-findings",
+      "name": "Read Keyword Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_keyword_research?select=keyword,search_volume,keyword_difficulty,cpc,competition,intent,cluster_label,source_facts&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "read-technical-findings",
+      "name": "Read Technical Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2200,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_technical_findings?select=finding_id,url,issue_class,severity,detail,evidence,cwv,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&status=eq.open&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "read-rank-findings",
+      "name": "Read Rank Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_findings?select=finding_id,class,target_keyword,target_url,recommendation,evidence,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&status=eq.open&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "normalize",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function normUrl(u) {\n  if (u == null) return null;\n  let s = String(u).trim(); if (!s) return null;\n  s = s.replace(/#.*$/, '').replace(/\\?.*$/, '');\n  s = s.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '');\n  s = s.replace(/\\/+$/, '');\n  return s.toLowerCase() || null;\n}\nfunction rows(nodeName) {\n  // Returns { ok, rows[] } for a child read node. A missing node / non-2xx / empty body → not ok.\n  let resp;\n  try { resp = ($(nodeName).all()[0] || {}).json || {}; } catch (e) { return { ok: false, rows: [] }; }\n  const status = Number(resp.statusCode || 0);\n  if (status && (status < 200 || status >= 300)) return { ok: false, rows: [] };\n  let r = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(r)) r = r ? [r] : [];\n  return { ok: true, rows: r };\n}\nconst SEV_ORDER = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };\nconst items = $input.all();\nconst cfg = (items[0] && items[0].json) || {};\nconst include = Array.isArray(cfg.__include) ? cfg.__include : [];\nconst childStatus = Object.assign({}, cfg.__child_status || {});\nconst findings = [];\n\n// --- keyword_research → tmpl_seo_keyword_research rows ---\nif (include.indexOf('keyword_research') !== -1) {\n  const kw = rows('Read Keyword Findings');\n  if (!kw.ok) { childStatus.keyword_research = 'error'; }\n  else if (kw.rows.length === 0) { childStatus.keyword_research = 'no_data'; }\n  else {\n    childStatus.keyword_research = 'ok';\n    for (const r of kw.rows) {\n      if (!r || r.keyword == null) continue;\n      const vol = Number(r.search_volume) || 0;\n      const kd = r.keyword_difficulty == null ? null : Number(r.keyword_difficulty);\n      // Opportunity severity band: high volume + low difficulty is the strongest signal.\n      let sev = 'low';\n      if (vol >= 500 && (kd == null || kd <= 40)) sev = 'high';\n      else if (vol >= 100) sev = 'medium';\n      findings.push({\n        finding_id: (r.source_facts && r.source_facts.keyword_id) || ('KW-' + String(r.keyword)),\n        source_brick: 'keyword_research',\n        url: null,\n        keyword: String(r.keyword),\n        issue_class: 'kw:opportunity',\n        severity: sev,\n        evidence: { search_volume: vol, keyword_difficulty: kd, cpc: r.cpc == null ? null : Number(r.cpc), cluster_label: r.cluster_label || null, intent: r.intent || null },\n      });\n    }\n  }\n}\n\n// --- technical_audit → tmpl_seo_technical_findings rows ---\nif (include.indexOf('technical_audit') !== -1) {\n  const tech = rows('Read Technical Findings');\n  if (!tech.ok) { childStatus.technical_audit = 'error'; }\n  else if (tech.rows.length === 0) { childStatus.technical_audit = 'no_data'; }\n  else {\n    childStatus.technical_audit = 'ok';\n    for (const r of tech.rows) {\n      if (!r || !r.finding_id) continue;\n      const sev = SEV_ORDER[r.severity] ? r.severity : 'info';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'technical_audit',\n        url: r.url != null ? String(r.url) : null,\n        keyword: null,\n        issue_class: 'tech:' + (r.issue_class || 'unknown'),\n        severity: sev,\n        evidence: Object.assign({}, r.evidence || {}, r.cwv ? { cwv: r.cwv } : {}, { detail: r.detail || null }),\n      });\n    }\n  }\n}\n\n// --- rank_tracker → tmpl_seo_findings rows (seo-improver opportunity ledger) ---\nif (include.indexOf('rank_tracker') !== -1) {\n  const rank = rows('Read Rank Findings');\n  if (!rank.ok) { childStatus.rank_tracker = 'error'; }\n  else if (rank.rows.length === 0) { childStatus.rank_tracker = 'no_data'; }\n  else {\n    childStatus.rank_tracker = 'ok';\n    const CLASS_SEV = { 'SEO-STRIKE': 'high', 'SEO-DECAY': 'high', 'SEO-CANN': 'medium', 'SEO-CTR': 'medium' };\n    for (const r of rank.rows) {\n      if (!r || !r.finding_id) continue;\n      const cls = r.class || 'SEO-UNKNOWN';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'rank_tracker',\n        url: r.target_url != null ? String(r.target_url) : null,\n        keyword: r.target_keyword != null ? String(r.target_keyword) : null,\n        issue_class: 'rank:' + cls,\n        severity: CLASS_SEV[cls] || 'medium',\n        evidence: Object.assign({}, r.evidence || {}, r.recommendation ? { recommendation: r.recommendation } : {}),\n      });\n    }\n  }\n}\n\n// entity = normalized url when present, else the keyword (the dedup key subject).\nfor (const f of findings) { f.entity = normUrl(f.url) || (f.keyword ? String(f.keyword).toLowerCase() : null); }\nconst factsOk = findings.length > 0;\nreturn [{ json: Object.assign({}, cfg, {\n  __child_status: childStatus,\n  __findings: findings,\n  __facts_ok: factsOk,\n}) }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "dedup",
+      "name": "Dedup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nconst SEV_ORDER = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };\nconst SEV_NAME = { 5: 'critical', 4: 'high', 3: 'medium', 2: 'low', 1: 'info' };\nconst items = $input.all();\nconst j = (items[0] && items[0].json) || {};\nconst findings = Array.isArray(j.__findings) ? j.__findings : [];\n// task_id is scoped by target so the SAME entity (e.g. a shared keyword) under two different\n// targets yields DISTINCT stable ids — no cross-target task collision (the judge's coarse-key\n// concern). Same target + same entity across runs keeps the same id (stable UPSERT).\nconst targetScope = String(j.__target || '');\n// Group by entity (falls back to the finding_id when there is no entity — still a task of one).\nconst groups = {};\nfor (const f of findings) {\n  const key = f.entity || ('fid:' + f.finding_id);\n  (groups[key] = groups[key] || []).push(f);\n}\nconst tasks = [];\nfor (const key of Object.keys(groups)) {\n  const members = groups[key];\n  let maxSev = 1;\n  const bricks = {};\n  const classes = {};\n  const mergedFrom = [];\n  let url = null, keyword = null;\n  const evidence = {};\n  for (const m of members) {\n    maxSev = Math.max(maxSev, SEV_ORDER[m.severity] || 1);\n    bricks[m.source_brick] = 1;\n    classes[m.issue_class] = 1;\n    mergedFrom.push({ finding_id: m.finding_id, source_brick: m.source_brick });\n    if (!url && m.url) url = m.url;\n    if (!keyword && m.keyword) keyword = m.keyword;\n    evidence[m.source_brick] = m.evidence || {};\n  }\n  const brickList = Object.keys(bricks);\n  const task_id = 'TASK-' + String(hash(targetScope + '|' + key) % 100000).padStart(5, '0');\n  tasks.push({\n    task_id: task_id,\n    entity: key,\n    url_or_entity: url || keyword || key,\n    url: url,\n    keyword: keyword,\n    issue_classes: Object.keys(classes),\n    severity: SEV_NAME[maxSev] || 'info',\n    merged_from: mergedFrom,\n    cross_brick: brickList.length,\n    brick_list: brickList,\n    evidence: evidence,\n  });\n}\nreturn [{ json: Object.assign({}, j, { __tasks: tasks }) }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "prioritize",
+      "name": "Prioritize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const SEV_IMPACT = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };\n// Effort heuristic per issue-class fragment (higher = costlier fix). Restructures cost most.\nfunction effortFor(classes) {\n  let e = 2; // default (a copy/meta tweak)\n  for (const c of classes) {\n    if (c === 'tech:duplicate' || c === 'rank:SEO-CANN') e = Math.max(e, 5);\n    else if (c === 'tech:canonical' || c === 'tech:links' || c === 'rank:SEO-DECAY') e = Math.max(e, 4);\n    else if (c === 'tech:perf' || c === 'kw:opportunity') e = Math.max(e, 3);\n    else if (c === 'rank:SEO-STRIKE') e = Math.max(e, 3);\n    else if (c === 'tech:meta' || c === 'tech:status' || c === 'tech:indexability') e = Math.max(e, 1);\n  }\n  return Math.min(5, Math.max(1, e));\n}\nconst items = $input.all();\nconst j = (items[0] && items[0].json) || {};\nconst tasks = Array.isArray(j.__tasks) ? j.__tasks : [];\nconst ranked = tasks.map((t) => {\n  let impact = SEV_IMPACT[t.severity] || 1;\n  // Cross-brick corroboration lifts impact (two independent checks agreeing = higher confidence).\n  if (t.cross_brick >= 2) impact = Math.min(5, impact + 1);\n  // Keyword volume band lift (grounded on the kw evidence when present).\n  const kwEv = (t.evidence && t.evidence.keyword_research) || {};\n  if (Number(kwEv.search_volume) >= 1000) impact = Math.min(5, impact + 1);\n  const effort = effortFor(t.issue_classes || []);\n  // Impact is the DOMINANT term (×10 outranks the 1..5 effort tiebreaker), so a critical fix is\n  // never buried under a trivial easy one; among equal-impact tasks the lower-effort quick win\n  // ranks first via (6 - effort).\n  const priority_score = impact * 10 + (6 - effort);\n  return Object.assign({}, t, { impact: impact, effort: effort, priority_score: priority_score });\n});\nranked.sort((a, b) => {\n  if (b.priority_score !== a.priority_score) return b.priority_score - a.priority_score;\n  if (b.impact !== a.impact) return b.impact - a.impact;\n  return (b.cross_brick || 0) - (a.cross_brick || 0);\n});\nreturn [{ json: Object.assign({}, j, { __queue: ranked }) }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "summarize",
+      "name": "Summarize?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "summarize-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_AUDIT_SUMMARY_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "exec-summary",
+      "name": "Exec Summary",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3520,
+        -120
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_SUMMARY_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach-summary",
+      "name": "Attach Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Prioritize').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  let summary = null;\n  const cand = (p && typeof p === 'object') ? (p.summary || p.executive_summary) : null;\n  if (typeof cand === 'string' && cand.trim()) summary = cand.trim().slice(0, 1200);\n  const rationale = (p && typeof p === 'object' && p.rationale && typeof p.rationale === 'object') ? p.rationale : {};\n  const queue = (Array.isArray(c.__queue) ? c.__queue : []).map((t) => {\n    const rec = rationale[t.task_id];\n    return Object.assign({}, t, { recommendation: (typeof rec === 'string' && rec.trim()) ? rec.trim().slice(0, 600) : null });\n  });\n  out.push({ json: Object.assign({}, c, { __summary: summary, __queue: queue }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-summary",
+      "name": "Skip Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        100
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const queue = (Array.isArray(j.__queue) ? j.__queue : []).map((t) => Object.assign({}, t, { recommendation: null }));\n  return { json: Object.assign({}, j, { __summary: null, __queue: queue }) };\n});"
+      }
+    },
+    {
+      "id": "compose-run",
+      "name": "Compose Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const cs = j.__child_status || {};\n  const queue = Array.isArray(j.__queue) ? j.__queue : [];\n  const statuses = Object.keys(cs).map((k) => cs[k]);\n  const anyOk = statuses.indexOf('ok') !== -1;\n  let status;\n  if (queue.length > 0) status = 'complete';\n  else if (statuses.indexOf('error') !== -1 && !anyOk) status = 'error';\n  else status = 'no_data';\n  out.push({ json: Object.assign({}, j, { __status: status, __queue: queue }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-run",
+      "name": "Write Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4180,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_audit_runs?on_conflict=tenant,target,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tenant: $json.__tenant, target: ($json.__target || ''), run_date: $json.__run_date, status: $json.__status, child_status: $json.__child_status, summary: $json.__summary }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "write-queue",
+      "name": "Write Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4400,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_audit_queue?on_conflict=tenant,run_date,task_id",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__queue || []).map((t) => ({ tenant: $json.__tenant, run_date: $json.__run_date, task_id: t.task_id, url_or_entity: t.url_or_entity, issue_classes: t.issue_classes, severity: t.severity, merged_from: t.merged_from, priority_score: t.priority_score, impact: t.impact, effort: t.effort, recommendation: t.recommendation, status: \"open\" }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst TOP_N = 5;\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const queue = Array.isArray(j.__queue) ? j.__queue : [];\n  const cs = j.__child_status || {};\n  const csLine = Object.keys(cs).map((k) => k + ':' + cs[k]).join(', ');\n  let message;\n  if (queue.length === 0) {\n    message = '🧭 SEO audit — no prioritized tasks this run (children: ' + (csLine || 'none') +\n      '). No tasks are shown because no findings were returned.';\n  } else {\n    const top = queue.slice(0, TOP_N).map((t, i) => {\n      const cls = (t.issue_classes || []).join('+');\n      const rec = t.recommendation ? (' — ' + String(t.recommendation).slice(0, 140)) : '';\n      return (i + 1) + '. [' + t.priority_score + '] ' + (t.url_or_entity || '?') + ' (' + cls + ', ' + t.severity + ')' + rec;\n    });\n    const summary = j.__summary ? (String(j.__summary).slice(0, 600) + '\\n\\n') : '';\n    message = summary + '🧭 SEO audit — ' + queue.length + ' prioritized task(s). Top ' +\n      Math.min(TOP_N, queue.length) + ':\\n' + top.join('\\n') + '\\n\\nChildren: ' + (csLine || 'none') + '.';\n  }\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'seo_audit',\n    tenant: j.__tenant || null,\n    target: j.__target || null,\n    run_date: j.__run_date || null,\n    status: j.__status || null,\n    task_count: queue.length,\n    child_status: cs,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4840,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Audit Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC": {
+      "main": [
+        [
+          {
+            "node": "Auth Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Gate": {
+      "main": [
+        [
+          {
+            "node": "Sign Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Ack": {
+      "main": [
+        [
+          {
+            "node": "Ack 202 Signed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack 202 Signed": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Keyword Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Keyword Research": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Technical Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Technical Audit": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Rank Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Rank Tracker": {
+      "main": [
+        [
+          {
+            "node": "Read Keyword Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Keyword Findings": {
+      "main": [
+        [
+          {
+            "node": "Read Technical Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Technical Findings": {
+      "main": [
+        [
+          {
+            "node": "Read Rank Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Rank Findings": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Dedup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup": {
+      "main": [
+        [
+          {
+            "node": "Prioritize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prioritize": {
+      "main": [
+        [
+          {
+            "node": "Summarize?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize?": {
+      "main": [
+        [
+          {
+            "node": "Exec Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exec Summary": {
+      "main": [
+        [
+          {
+            "node": "Attach Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Summary": {
+      "main": [
+        [
+          {
+            "node": "Compose Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Summary": {
+      "main": [
+        [
+          {
+            "node": "Compose Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Run": {
+      "main": [
+        [
+          {
+            "node": "Write Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Run": {
+      "main": [
+        [
+          {
+            "node": "Write Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Queue": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

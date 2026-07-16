@@ -35,9 +35,14 @@ the `public` schema with no client values and no secrets. Every template is
 | [`templates/server-write-only-lock.sql`](templates/server-write-only-lock.sql) | (1) app data | Per-user table with **server-write-only** columns (e.g. `plan`/billing): owner reads/inserts/updates the row but `UPDATE` on the locked columns is REVOKEd from `anon`+`authenticated` — only `service_role`/the billing webhook writes them. |
 | [`templates/shopify-cache.sql`](templates/shopify-cache.sql) | (2) cache | Short-lived, deliberately-stale cache row (`ttl_seconds`/`fetched_at`), `service_role`-only. **Not a source of truth** — a miss re-fetches from Shopify, never "trust the cache". |
 | [`templates/derived-history.sql`](templates/derived-history.sql) | (3) derived history | Append-only point-in-time snapshots (stock-history). `service_role` inserts, `authenticated` reads to draw trends; `anon` never touches it. Net-new data Shopify doesn't retain — never a live mirror. |
+| [`templates/keyword-research.sql`](templates/keyword-research.sql) | (1) app data | `tmpl_seo_keyword_research` — grounded keyword ledger for the `[keyword_research_plugin]` brick. Server-write-only (RLS on, REVOKE ALL from anon/public, `service_role` policy only); no public read surface. |
+| [`templates/technical-audit.sql`](templates/technical-audit.sql) | (1) app data | `tmpl_seo_technical_findings` — grounded technical-findings ledger for the `[technical_audit_plugin]` brick. Server-write-only; no public read surface. |
+| [`templates/seo-rank-snapshots.sql`](templates/seo-rank-snapshots.sql) | (3) derived history | `tmpl_seo_rank_snapshots` — append point-in-time ranks (D-1) for the `[seo_improver_plugin]` rank tracker. Server-write-only. |
+| [`templates/seo-findings.sql`](templates/seo-findings.sql) | (1) app data | `tmpl_seo_findings` — stable-ID SEO opportunities ledger (D-2) for the `[seo_improver_plugin]` brick (`pr_url` null until Phase-2 fills it). Server-write-only. |
+| [`templates/seo-audit-runs.sql`](templates/seo-audit-runs.sql) | (1) app data | The `[seo_audit_orchestrator_plugin]` brick's isolated PAIR — `tmpl_seo_audit_runs` (one row per run, `child_status` honesty record) + `tmpl_seo_audit_queue` (one row per prioritized task, `merged_from` dedup trail). Server-write-only; no public read surface. |
 
-Six templates create **seven tables** (`child-owned-via-parent` creates two:
-`tmpl_parent_requests` + `tmpl_child_documents`).
+Eleven templates create **thirteen tables** (`child-owned-via-parent` and
+`seo-audit-runs` each create two).
 
 ## Conventions baked into every template
 

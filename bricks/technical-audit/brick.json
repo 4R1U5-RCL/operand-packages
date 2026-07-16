@@ -1,0 +1,13 @@
+{
+  "name": "technical-audit",
+  "plugin": "[technical_audit_plugin]",
+  "title": "Technical site audit",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/technical-audit",
+  "components": [
+    "n8n/workflows/technical-audit.json",
+    "Webapp/spend-gate",
+    "supabase/templates/technical-audit.sql"
+  ],
+  "planned": []
+}
