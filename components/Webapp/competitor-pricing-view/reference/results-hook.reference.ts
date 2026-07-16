@@ -9,7 +9,7 @@
  *
  * BOUNDARY — this hook only READS. It does not trigger, schedule, or scrape.
  * The report it reads was produced entirely by the studio's hosted pricing
- * service on csco.app.n8n.cloud. Adding a scrape/schedule/structuring call here
+ * service on <studio-n8n-host>. Adding a scrape/schedule/structuring call here
  * is a reverse-gate-B boundary violation (see CLAUDE.md / docs/boundary.md).
  *
  * Two halves:

@@ -14,7 +14,7 @@ else:
 - the **results-fetch hook** (the read seam) that pulls that report.
 
 The report itself is produced entirely by the studio's **hosted** pricing service
-on `csco.app.n8n.cloud`. That hosted pipeline is the recurring IP and never
+on `<studio-n8n-host>`. That hosted pipeline is the recurring IP and never
 enters this repo.
 
 ## HARD constraints — the recurring boundary (baseline §8)

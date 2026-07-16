@@ -26,7 +26,7 @@ CLAUDE.md                       hard constraints (the recurring boundary)
 
 The competitor-pricing **scrape pipeline** — the Firecrawl scrapers, the
 schedule, and the structuring/LLM step — is the studio's hosted recurring IP and
-runs entirely on `csco.app.n8n.cloud`. **None of it lives here.**
+runs entirely on `<studio-n8n-host>`. **None of it lives here.**
 
 This package contains **only**: a read/display view of the latest already-produced
 report, and the results-fetch hook that pulls it. Adding a scraper, a schedule, a

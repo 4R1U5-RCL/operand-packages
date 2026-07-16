@@ -5,7 +5,7 @@ same house style as [`../Claude/`](../Claude/): self-contained, env-driven confi
 (`~/.claude/<pkg>.env` fallback), Node-22 built-ins for the core, an offline
 `selftest.mjs` that EARNS its pass (negative controls fire), and a `README.md` +
 boundary `CLAUDE.md`. **Recurring boundary throughout:** n8n workflow *definitions*
-stay hosted on `csco.app.n8n.cloud`; a package ships only the signed hook/route, a
+stay hosted on `<studio-n8n-host>`; a package ships only the signed hook/route, a
 display/read view, DB migrations, and a doc of the matching n8n node — never the
 workflow graph, scrapers, schedulers, or structuring logic.
 

@@ -43,7 +43,7 @@ only takes already-built output live.
 ### 2. GATE A — Confirm the correct Vercel project ID/target (NEVER trust `/studio/.env`)
 
 `/studio/.env`'s `VERCEL_PROJECT_ID` / `VERCEL_ORG_ID` point at the harness
-**`studio-storefront`** project (`prj_oFVIrIDvZeW7P5u26vYQP9KcIinI`, rootDir
+**`studio-storefront`** project (`<VERCEL_PROJECT_ID redacted>`, rootDir
 `apps/storefront`) — NOT the client. Deploying with those set verbatim builds the
 wrong app and fails with `apps/web/apps/storefront does not exist`. Confirmed
 2026-06-27.
@@ -55,7 +55,7 @@ wrong app and fails with `apps/web/apps/storefront does not exist`. Confirmed
   cat "$APP_DIR/.vercel/project.json"   # projectId + orgId the link actually uses
   ```
 - Known-good Tessera target (team `rcl` = `team_Txmx3JvzXjV8jsOBxttrkMjJ`):
-  - `studio-tessera-web` = `prj_pdGYdOfUOyQwPEIOOsFRlMwB3DQj`, rootDir `apps/web`.
+  - `studio-tessera-web` = `<VERCEL_PROJECT_ID redacted>`, rootDir `apps/web`.
 - **The blocking rule:** confirm the project ID/slug explicitly before deploy.
   The safe path is to `source /studio/.env` for `VERCEL_TOKEN`, then
   **`unset VERCEL_PROJECT_ID VERCEL_ORG_ID`** so the repo's `.vercel` link wins
@@ -196,8 +196,8 @@ If any gate BLOCKED, report which one and why, and STOP — no deploy was issued
 
 ## Reference
 
-- Tessera Vercel target: `studio-tessera-web` = `prj_pdGYdOfUOyQwPEIOOsFRlMwB3DQj`,
+- Tessera Vercel target: `studio-tessera-web` = `<VERCEL_PROJECT_ID redacted>`,
   team `rcl` = `team_Txmx3JvzXjV8jsOBxttrkMjJ`, rootDir `apps/web`.
-- Trap project: `studio-storefront` = `prj_oFVIrIDvZeW7P5u26vYQP9KcIinI`.
+- Trap project: `studio-storefront` = `<VERCEL_PROJECT_ID redacted>`.
 - Memory: `~/.claude/projects/-studio/memory/project_studio-tessera-vercel.md`.
 - Traps: `/studio/ERRORS_AND_FINDINGS.md` — PAT-7, PAT-8 (also TE-18, TE-21).

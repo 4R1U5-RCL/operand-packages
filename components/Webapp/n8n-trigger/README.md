@@ -69,7 +69,7 @@ a caller through.
 
 ```bash
 # ~/.claude/n8n-trigger.env   (chmod 600 — read only as a fallback)
-N8N_WEBHOOK_URL=https://csco.app.n8n.cloud/webhook/<path>
+N8N_WEBHOOK_URL=https://<studio-n8n-host>/webhook/<path>
 N8N_WEBHOOK_SECRET=<secret>
 ```
 

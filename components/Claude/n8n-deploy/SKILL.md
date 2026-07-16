@@ -60,15 +60,15 @@ ls builders/
 
 ### 2. Confirm instance credentials (never paste them)
 
-The hosted instance is **`csco.app.n8n.cloud` — SHARED PRODUCTION** (it also hosts
+The hosted instance is **`<studio-n8n-host>` — SHARED PRODUCTION** (it also hosts
 the `[TESSERA]`/`[MOSAIC]`/`[SCARLET]`/`[STUDIO_*]` families; existing workflows are
 READ-ONLY). Templates go to the `PACKAGE/Templates` project
-(`N8N_TEMPLATES_PROJECT_ID=IKEgTeej0upY4GVP`). Auth header is `X-N8N-API-KEY`.
+(`N8N_TEMPLATES_PROJECT_ID=<N8N_TEMPLATES_PROJECT_ID redacted>`). Auth header is `X-N8N-API-KEY`.
 
 ```bash
 set -euo pipefail
 set -a; . /studio/.env; set +a
-export N8N_TEMPLATES_PROJECT_ID="${N8N_TEMPLATES_PROJECT_ID:-IKEgTeej0upY4GVP}"
+export N8N_TEMPLATES_PROJECT_ID="${N8N_TEMPLATES_PROJECT_ID:-<N8N_TEMPLATES_PROJECT_ID redacted>}"
 # Presence checks ONLY — never print the values (PAT-6).
 for v in N8N_API_KEY N8N_BASE_URL N8N_TEMPLATES_PROJECT_ID; do
   if [ -n "${!v:-}" ]; then echo "$v: set"; else echo "$v: MISSING"; fi
@@ -102,7 +102,7 @@ const activate = process.env.N8N_DO_ACTIVATE === 'true';
 const ctx = {
   baseUrl: process.env.N8N_BASE_URL!,
   apiKey: process.env.N8N_API_KEY!,           // read from env — never logged
-  projectId: process.env.N8N_TEMPLATES_PROJECT_ID || 'IKEgTeej0upY4GVP',
+  projectId: process.env.N8N_TEMPLATES_PROJECT_ID || '<N8N_TEMPLATES_PROJECT_ID redacted>',
 };
 const mod = await import(`/studio/clients/_n8n-templates/builders/${key}.ts`);
 const def = (mod.default ?? mod.build)();      // WorkflowDefinition, [TEMPLATE]-prefixed
@@ -172,7 +172,7 @@ n8n template deployed: <key> → <[TEMPLATE] name>
   workflow id: <id>
   action: <created|updated>
   active: <true|false>   (inactive unless --activate)
-  project: PACKAGE/Templates (IKEgTeej0upY4GVP) on csco.app.n8n.cloud
+  project: PACKAGE/Templates (<N8N_TEMPLATES_PROJECT_ID redacted>) on <studio-n8n-host>
 ```
 
 Never include any key/token in the report.
@@ -183,7 +183,7 @@ Never include any key/token in the report.
   `packages/n8n-templates`, re-run; never hand-patch the live workflow.
 - **No workflow definition ever enters a client repo** (§8). This pushes to the
   hosted instance only.
-- `csco.app.n8n.cloud` is SHARED PRODUCTION: only touch `[TEMPLATE]`-named
+- `<studio-n8n-host>` is SHARED PRODUCTION: only touch `[TEMPLATE]`-named
   workflows in the `PACKAGE/Templates` project; existing families are READ-ONLY.
 - Default INACTIVE. Activation requires explicit `--activate`.
 - Secrets: load from `/studio/.env`, presence-check only, never echo, rotate on
