@@ -1,0 +1,12 @@
+{
+  "name": "gsc-csv",
+  "plugin": "[gsc_csv_plugin]",
+  "title": "GSC integration — CSV stopgap → CTR / cannibalization findings",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/gsc-csv",
+  "components": [
+    "n8n/workflows/gsc-csv.json",
+    "supabase/templates/gsc-csv.sql"
+  ],
+  "planned": []
+}

@@ -1,0 +1,13 @@
+{
+  "name": "keyword-research",
+  "plugin": "[keyword_research_plugin]",
+  "title": "Keyword research",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/keyword-research",
+  "components": [
+    "n8n/workflows/keyword-research.json",
+    "Webapp/spend-gate",
+    "supabase/templates/keyword-research.sql"
+  ],
+  "planned": []
+}

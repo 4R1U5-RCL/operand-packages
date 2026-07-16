@@ -1,0 +1,13 @@
+{
+  "name": "backlinks",
+  "plugin": "[backlinks_plugin]",
+  "title": "Backlinks — referring domains + link gaps",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/backlinks",
+  "components": [
+    "n8n/workflows/backlinks.json",
+    "Webapp/spend-gate",
+    "supabase/templates/backlinks.sql"
+  ],
+  "planned": []
+}

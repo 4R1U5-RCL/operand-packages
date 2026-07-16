@@ -1,0 +1,13 @@
+{
+  "name": "content-tracker",
+  "plugin": "[content_tracker_plugin]",
+  "title": "Content / on-page tracker",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/content-tracker",
+  "components": [
+    "n8n/workflows/content-tracker.json",
+    "Webapp/spend-gate",
+    "supabase/templates/content-tracker.sql"
+  ],
+  "planned": []
+}

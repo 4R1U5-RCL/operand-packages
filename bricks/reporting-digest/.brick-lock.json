@@ -1,0 +1,9 @@
+{
+  "brick": "reporting-digest",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/reporting-digest.json": "ad2b1cb959d546147ade56e8327419c24ddd184a22349c7a98df7984c48a67d5",
+    "supabase/templates/seo-audit-runs.sql": "88d6ad46fa5a24e355f2403c1d79704438bc3e90df4b99720e06030f770f7ba2",
+    "supabase/templates/reporting-digest.sql": "71c504f476ef1b4489f9f98375d55589c6f9965a6654bc6b5f0bffab3fdfdf92"
+  }
+}

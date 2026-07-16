@@ -1,0 +1,9 @@
+{
+  "brick": "backlinks",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/backlinks.json": "25557296acf403810be57c2ab167162a7edfebac4e73d02616650f5f89caf600",
+    "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
+    "supabase/templates/backlinks.sql": "cc5ba7763806a9236951fffbd194347d5190457796a13c7f619f029375d5e475"
+  }
+}

@@ -1,0 +1,1028 @@
+{
+  "name": "[TEMPLATE] [backlinks_plugin] Backlinks — DataForSEO Backlinks → referring domains + link gaps → prioritize → notify",
+  "nodes": [
+    {
+      "id": "backlinks-webhook",
+      "name": "Backlinks Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "backlinks",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "verify-hmac",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst MAX_SKEW_MS = 300000;\nconst SIG_HEADER = \"x-n8n-signature\";\nconst TS_HEADER = \"x-n8n-timestamp\";\nconst STATIC_HEADER = \"x-static-token\";\nconst hmac = (d) => crypto.createHmac('sha256', SECRET).update(d).digest('hex');\nconst safeEq = (aHex, bHex) => {\n  if (!aHex || !bHex) return false;\n  const a = Buffer.from(String(aHex)), b = Buffer.from(String(bHex));\n  return a.length === b.length && crypto.timingSafeEqual(a, b);\n};\n// TE-16: recover the EXACT signed bytes — rawBody when n8n captured it, else a\n// careful re-stringify of the parsed body (must round-trip byte-identical).\nconst rawOf = (j) => (j.rawBody != null) ? j.rawBody.toString() : JSON.stringify(j.body);\n\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const headers = j.headers || {};\n  const raw = rawOf(j);\n  let ok = false;\n  // Fail-closed: an unconfigured secret can never verify (and never throws).\n  if (SECRET) {\n  const sig = headers[SIG_HEADER];\n  const ts = headers[TS_HEADER];\n  if (ts) {\n    // timestamp PRESENT -> studio form: replay-guarded HMAC(`${ts}.${body}`).\n    const n = Number(ts);\n    if (sig && Number.isFinite(n) && Math.abs(Date.now() - n) <= MAX_SKEW_MS) {\n      ok = safeEq(hmac(ts + '.' + raw), sig);\n    }\n  } else {\n    // timestamp ABSENT -> harness verify-n8n form: bare-body HMAC(`${body}`),\n    // only the signature header present.\n    ok = safeEq(hmac(raw), sig);\n  }\n  }\n  // n8n Cloud freezes Code-node input items (IN-25): in-place mutations are\n  // silently dropped — always RETURN new items.\n  const item = { json: Object.assign({}, j, { __authok: ok }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "auth-gate",
+      "name": "Auth Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "auth-gate-cond",
+              "leftValue": "={{ $json.__authok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "reject-401",
+      "name": "Reject 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"invalid or missing signature\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "sign-ack",
+      "name": "Sign Ack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const requestId = (j.body && j.body.request_id) || j.request_id || null;\n  const body = { ok: true, request_id: requestId };\n  const payload = JSON.stringify(body);\n  // n8n Cloud freezes Code-node input items (IN-25): in-place writes are silently\n  // dropped, so the respond node would read an item WITHOUT __sig and answer\n  // unsigned. Always RETURN a NEW item carrying the signing fields (and binary).\n  // Fail-open to UNSIGNED when the secret is unreachable — empty __sig rather than\n  // throw or sign with an empty key.\n  const item = { json: Object.assign({}, j, {\n    __body: body,\n    __ts: String(Date.now()),\n    __sig: SECRET ? crypto.createHmac('sha256', SECRET).update(payload).digest('hex') : '',\n  }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "ack-202-signed",
+      "name": "Ack 202 Signed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        -40
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.__body }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "x-n8n-signature",
+                "value": "={{ $json.__sig }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "every-week",
+      "name": "Every Week",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        220
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nfunction host(d) { return d ? String(d).replace(/^https?:\\/\\//, '').replace(/^www\\./, '').split('/')[0].trim() : null; }\nfunction toList(s) { return String(s || '').split(',').map((x) => host(x)).filter(Boolean); }\nconst MAX = 5;\nconst items = $input.all();\nconst src = (items[0] && items[0].json) || {};\nconst body = (src.body && typeof src.body === 'object') ? src.body : src;\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\nlet domain = host(safe(() => ($vars.SEO_TARGET_DOMAIN)));\nif (body && body.domain) { const bd = host(safe(() => body.domain)); if (bd) domain = bd; }\nlet competitors = toList(safe(() => ($vars.SEO_COMPETITOR_DOMAINS)));\nif (body && body.competitor_domains) { const bc = Array.isArray(body.competitor_domains) ? body.competitor_domains.join(',') : body.competitor_domains; const bl = toList(bc); if (bl.length) competitors = bl; }\n// Never intersect the target with itself; bound the set.\ncompetitors = competitors.filter((c) => c && c !== domain).slice(0, MAX);\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nconst runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\nconst hasDomain = !!domain;\nreturn [{ json: Object.assign({}, src, {\n  __tenant: tenant,\n  __domain: domain,\n  __competitors: competitors,\n  __run_date: day(runMs),\n  __facts_ok: hasDomain ? null : false,\n  __facts_reason: hasDomain ? null : 'no_domain',\n}) }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "spend-read",
+      "name": "Spend Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/global_send_quotas?select=spend_usd,count&channel=eq.dataforseo&sender_id=eq.dataforseo-daily&window_start=eq.{{ encodeURIComponent(new Date().toISOString().slice(0,10)) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "spend-gate",
+      "name": "Spend Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"SEO_DATAFORSEO_DAILY_CAP\"));\nconst ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const row = rows[0] || {};\n  const spent = Number(row.spend_usd != null ? row.spend_usd : (row.count != null ? row.count : 0)) || 0;\n  // No cap configured → do not block (fail-open); a finite cap gates at the boundary.\n  const under = !Number.isFinite(CAP) || CAP <= 0 ? true : spent < CAP;\n  out.push({ json: Object.assign({}, c, { __spend_under_cap: under }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "pull-summary",
+      "name": "Pull Summary?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pull-summary-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true && $json.__facts_ok !== false && (($json.__domain || \"\") !== \"\") }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "backlink-summary",
+      "name": "Backlink Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/backlinks/summary/live",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ target: $json.__domain, internal_list_limit: 10, backlinks_status_type: \"live\", include_subdomains: true }]) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cred-ref:dataforseo",
+          "name": "[OPERAND] DataForSEO Basic"
+        }
+      }
+    },
+    {
+      "id": "extract-summary",
+      "name": "Extract Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }\nconst THRESH = 40;\nconst ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  const findings = [];\n  let factsOk = false;\n  let reason = null;\n  let summary = null;\n  if (status === 401 || status === 403) { reason = 'dataforseo_unauthorized'; }\n  else if (status < 200 || status >= 300) { reason = 'dataforseo_error_' + (status || 'unknown'); }\n  else if (!parsed || !Array.isArray(parsed.tasks)) { reason = 'dataforseo_unparseable'; }\n  else {\n    const task = parsed.tasks[0] || {};\n    const taskStatus = Number(task.status_code || 0);\n    const result = Array.isArray(task.result) ? task.result[0] : null;\n    if (taskStatus && taskStatus !== 20000) { reason = 'dataforseo_task_' + taskStatus; }\n    else if (!result || typeof result !== 'object') { reason = 'dataforseo_empty'; }\n    else {\n      const referringDomains = num(result.referring_domains);\n      const backlinks = num(result.backlinks);\n      const rank = num(result.rank);\n      const spam = num(result.backlinks_spam_score);\n      const broken = num(result.broken_backlinks);\n      summary = { referring_domains: referringDomains, backlinks: backlinks, rank: rank, spam_score: spam, broken_backlinks: broken };\n      // Authority finding (the target's own profile summary).\n      findings.push({\n        finding_class: 'authority',\n        referring_domain: c.__domain,\n        competitor: null,\n        domain_authority: rank,\n        anchor: null,\n        evidence: { referring_domains: referringDomains, backlinks: backlinks, rank: rank },\n      });\n      // Toxic finding only when a spam signal is over threshold OR there are broken backlinks.\n      if ((spam != null && spam >= THRESH) || (broken != null && broken > 0)) {\n        findings.push({\n          finding_class: 'toxic',\n          referring_domain: c.__domain,\n          competitor: null,\n          domain_authority: rank,\n          anchor: null,\n          evidence: { backlinks_spam_score: spam, broken_backlinks: broken },\n        });\n      }\n      factsOk = true;\n    }\n  }\n  out.push({ json: Object.assign({}, c, {\n    __facts_ok: factsOk ? true : c.__facts_ok,\n    __facts_reason: factsOk ? c.__facts_reason : (c.__facts_reason || reason),\n    __summary: summary,\n    __summary_reason: reason,\n    __findings_summary: findings,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-summary",
+      "name": "Skip Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        100
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const reason = j.__facts_reason || (j.__spend_under_cap === false ? 'dataforseo_spend_cap' : 'no_domain');\n  return { json: Object.assign({}, j, { __facts_ok: false, __facts_reason: reason, __summary: null, __findings_summary: [] }) };\n});"
+      }
+    },
+    {
+      "id": "referring-domains",
+      "name": "Referring Domains",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/backlinks/referring_domains/live",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 90000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ target: $json.__domain, limit: 100, backlinks_status_type: \"live\", order_by: ['rank,desc'] }]) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cred-ref:dataforseo",
+          "name": "[OPERAND] DataForSEO Basic"
+        }
+      }
+    },
+    {
+      "id": "extract-referrers",
+      "name": "Extract Referrers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }\nconst MAX = 100;\nconst ctx = $('Extract Summary').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const findings = [];\n  let reason = null;\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  if (status === 401 || status === 403) { reason = 'dataforseo_unauthorized'; }\n  else if (status < 200 || status >= 300) { reason = 'dataforseo_error_' + (status || 'unknown'); }\n  else if (!parsed || !Array.isArray(parsed.tasks)) { reason = 'dataforseo_unparseable'; }\n  else {\n    const task = parsed.tasks[0] || {};\n    const result = Array.isArray(task.result) ? task.result[0] : null;\n    const list = result && Array.isArray(result.items) ? result.items : null;\n    if (!list) { reason = 'dataforseo_empty'; }\n    else {\n      const seen = {};\n      for (const it2 of list) {\n        if (!it2 || typeof it2 !== 'object') continue;\n        const d = (it2.domain != null) ? String(it2.domain).replace(/^www\\./, '').trim() : null;\n        if (!d || seen[d]) continue;\n        seen[d] = true;\n        const rank = num(it2.rank);\n        const backlinks = num(it2.backlinks);\n        findings.push({\n          finding_class: 'referring_domain',\n          referring_domain: d,\n          competitor: null,\n          domain_authority: rank,\n          anchor: null,\n          evidence: { referring_domain: d, rank: rank, backlinks: backlinks, first_seen: it2.first_seen != null ? String(it2.first_seen) : null },\n        });\n        // A dominant/notable anchor on this referrer, when the API surfaces one.\n        const anchor = (it2.anchor != null) ? String(it2.anchor).slice(0, 200) : null;\n        if (anchor) {\n          findings.push({\n            finding_class: 'anchor',\n            referring_domain: d,\n            competitor: null,\n            domain_authority: rank,\n            anchor: anchor,\n            evidence: { referring_domain: d, anchor: anchor, rank: rank },\n          });\n        }\n        if (findings.length >= MAX) break;\n      }\n      if (!findings.length) reason = 'dataforseo_no_referrers';\n    }\n  }\n  out.push({ json: Object.assign({}, c, { __findings_referrers: findings, __referrers_reason: reason }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "pull-gaps",
+      "name": "Pull Gaps?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pull-gaps-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true && $json.__facts_ok !== false && (($json.__competitors || []).length > 0) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "link-gap",
+      "name": "Link Gap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3080,
+        -260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/backlinks/domain_intersection/live",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 90000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([Object.assign({ targets: ($json.__competitors || []).reduce((acc, comp, idx) => { acc[String(idx + 1)] = comp; return acc; }, {}), exclude_targets: [$json.__domain], limit: 200, backlinks_status_type: \"live\", order_by: ['rank,desc'] })]) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cred-ref:dataforseo",
+          "name": "[OPERAND] DataForSEO Basic"
+        }
+      }
+    },
+    {
+      "id": "extract-gaps",
+      "name": "Extract Gaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -260
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }\nconst MAX = 200;\nconst ctx = $('Extract Referrers').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const competitors = Array.isArray(c.__competitors) ? c.__competitors : [];\n  const findings = [];\n  let reason = null;\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  if (status === 401 || status === 403) { reason = 'dataforseo_unauthorized'; }\n  else if (status < 200 || status >= 300) { reason = 'dataforseo_error_' + (status || 'unknown'); }\n  else if (!parsed || !Array.isArray(parsed.tasks)) { reason = 'dataforseo_unparseable'; }\n  else {\n    const task = parsed.tasks[0] || {};\n    const taskStatus = Number(task.status_code || 0);\n    const result = Array.isArray(task.result) ? task.result[0] : null;\n    const list = result && Array.isArray(result.items) ? result.items : null;\n    if (taskStatus && taskStatus !== 20000) { reason = 'dataforseo_task_' + taskStatus; }\n    else if (!list) { reason = 'dataforseo_empty'; }\n    else {\n      const seen = {};\n      for (const it2 of list) {\n        if (!it2 || typeof it2 !== 'object') continue;\n        const d = (it2.domain != null) ? String(it2.domain).replace(/^www\\./, '').trim() : null;\n        if (!d || seen[d]) continue;\n        seen[d] = true;\n        const rank = num(it2.rank);\n        // domain_intersection returns per-target link presence; the intersection request is built\n        // so the response rows ARE the gap set (link to competitor, not to target). We attribute\n        // the gap to the FIRST configured competitor as the outreach anchor (evidence keeps all).\n        const competitor = competitors[0] || null;\n        findings.push({\n          finding_class: 'link_gap',\n          referring_domain: d,\n          competitor: competitor,\n          domain_authority: rank,\n          anchor: null,\n          evidence: { referring_domain: d, rank: rank, competitors: competitors },\n        });\n        if (findings.length >= MAX) break;\n      }\n      if (!findings.length) reason = 'dataforseo_no_gaps';\n    }\n  }\n  out.push({ json: Object.assign({}, c, { __findings_gaps: findings, __gaps_reason: reason }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-gaps",
+      "name": "Skip Gaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const reason = j.__spend_under_cap === false ? 'dataforseo_spend_cap' : 'no_competitors';\n  return { json: Object.assign({}, j, { __findings_gaps: [], __gaps_reason: reason }) };\n});"
+      }
+    },
+    {
+      "id": "merge-findings",
+      "name": "Merge Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const summary = Array.isArray(j.__findings_summary) ? j.__findings_summary : [];\n  const referrers = Array.isArray(j.__findings_referrers) ? j.__findings_referrers : [];\n  const gaps = Array.isArray(j.__findings_gaps) ? j.__findings_gaps : [];\n  const findings = summary.concat(referrers).concat(gaps);\n  const patch = { __findings: findings };\n  if (!findings.length) {\n    patch.__facts_ok = false;\n    patch.__facts_reason = j.__summary_reason || j.__referrers_reason || j.__gaps_reason || j.__facts_reason || 'dataforseo_empty';\n  } else {\n    patch.__facts_ok = true;\n  }\n  return { json: Object.assign({}, j, patch) };\n});"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "prioritize",
+      "name": "Prioritize?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "prioritize-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_BACKLINK_PRIORITIZE_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "prioritize-opportunities",
+      "name": "Prioritize Opportunities",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3960,
+        -260
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_BACKLINK_PRIORITIZE_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach-priority",
+      "name": "Attach Priority",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        -260
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Merge Findings').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const byKey = (p && typeof p === 'object' && p.priority && typeof p.priority === 'object') ? p.priority : {};\n  const findings = (Array.isArray(c.__findings) ? c.__findings : []).map((f) => {\n    const key = f.finding_class + '|' + (f.referring_domain || '') + '|' + (f.competitor || '');\n    const e = byKey[key] || {};\n    const scoreRaw = Number(e.priority_score);\n    const score = Number.isFinite(scoreRaw) ? scoreRaw : null;\n    const rec = (typeof e.recommendation === 'string' && e.recommendation.trim()) ? e.recommendation.trim().slice(0, 600) : null;\n    return Object.assign({}, f, { priority_score: score, recommendation: rec });\n  });\n  out.push({ json: Object.assign({}, c, { __findings: findings }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-priority",
+      "name": "Skip Priority",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const findings = (Array.isArray(j.__findings) ? j.__findings : []).map((f) => Object.assign({}, f, { priority_score: null, recommendation: null }));\n  return { json: Object.assign({}, j, { __findings: findings }) };\n});"
+      }
+    },
+    {
+      "id": "assign-ids",
+      "name": "Assign IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const findings = Array.isArray(j.__findings) ? j.__findings : [];\n  const rows = findings.map((f) => {\n    const fid = 'LINK-' + ('00000000' + hash(String(j.__domain || '') + '|' + String(f.finding_class) + '|' + String(f.referring_domain || '') + '|' + String(f.competitor || '')).toString(16)).slice(-8);\n    return Object.assign({}, f, { finding_id: fid });\n  });\n  out.push({ json: Object.assign({}, j, { __rows: rows }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-findings",
+      "name": "Write Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4620,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_backlink_findings?on_conflict=tenant,finding_id,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__rows || []).map((r) => ({ tenant: $json.__tenant, domain: $json.__domain, run_date: $json.__run_date, finding_id: r.finding_id, finding_class: r.finding_class, referring_domain: r.referring_domain, competitor: r.competitor, domain_authority: r.domain_authority, anchor: r.anchor, priority_score: r.priority_score, recommendation: r.recommendation, status: \"open\", evidence: r.evidence }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const rows = Array.isArray(j.__rows) ? j.__rows : [];\n  const factsOk = j.__facts_ok === true;\n  let message;\n  if (!factsOk) {\n    const why = j.__facts_reason ? (' (' + j.__facts_reason + ')') : '';\n    message = '🔗 Backlinks — no backlink data could be read for this run' + why +\n      '. Nothing is shown because none was returned from DataForSEO.';\n  } else {\n    const referrers = rows.filter((r) => r.finding_class === 'referring_domain');\n    const gaps = rows.filter((r) => r.finding_class === 'link_gap');\n    const authority = rows.find((r) => r.finding_class === 'authority');\n    const rank = (authority && authority.domain_authority != null) ? authority.domain_authority : null;\n    // Best outreach: highest LLM priority_score among link gaps, else highest domain_authority gap.\n    const bestGap = gaps.slice().sort((a, b) => {\n      const pa = a.priority_score == null ? -1 : a.priority_score, pb = b.priority_score == null ? -1 : b.priority_score;\n      if (pa !== pb) return pb - pa;\n      const da = a.domain_authority == null ? -1 : a.domain_authority, db = b.domain_authority == null ? -1 : b.domain_authority;\n      return db - da;\n    })[0];\n    const gapTxt = bestGap ? (bestGap.referring_domain + (bestGap.domain_authority != null ? ' (rank ' + bestGap.domain_authority + ')' : '') + (bestGap.competitor ? ', links to ' + bestGap.competitor : '')) : 'n/a';\n    message = '🔗 Backlinks — \"' + (j.__domain || '?') + '\": ' + referrers.length + ' referring domain(s)' +\n      (rank != null ? ', domain rank ' + rank : '') + ', ' + gaps.length + ' link gap(s). Best outreach: ' + gapTxt;\n  }\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'backlinks',\n    tenant: j.__tenant || null,\n    domain: j.__domain || null,\n    run_date: j.__run_date || null,\n    facts_ok: factsOk,\n    finding_count: rows.length,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        5060,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Backlinks Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC": {
+      "main": [
+        [
+          {
+            "node": "Auth Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Gate": {
+      "main": [
+        [
+          {
+            "node": "Sign Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Ack": {
+      "main": [
+        [
+          {
+            "node": "Ack 202 Signed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack 202 Signed": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Week": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Spend Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Read": {
+      "main": [
+        [
+          {
+            "node": "Spend Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Gate": {
+      "main": [
+        [
+          {
+            "node": "Pull Summary?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull Summary?": {
+      "main": [
+        [
+          {
+            "node": "Backlink Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backlink Summary": {
+      "main": [
+        [
+          {
+            "node": "Extract Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Summary": {
+      "main": [
+        [
+          {
+            "node": "Referring Domains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Referring Domains": {
+      "main": [
+        [
+          {
+            "node": "Extract Referrers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Referrers": {
+      "main": [
+        [
+          {
+            "node": "Pull Gaps?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull Gaps?": {
+      "main": [
+        [
+          {
+            "node": "Link Gap",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Link Gap": {
+      "main": [
+        [
+          {
+            "node": "Extract Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Gaps": {
+      "main": [
+        [
+          {
+            "node": "Merge Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Gaps": {
+      "main": [
+        [
+          {
+            "node": "Merge Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Summary": {
+      "main": [
+        [
+          {
+            "node": "Merge Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Findings": {
+      "main": [
+        [
+          {
+            "node": "Prioritize?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prioritize?": {
+      "main": [
+        [
+          {
+            "node": "Prioritize Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prioritize Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Attach Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Priority": {
+      "main": [
+        [
+          {
+            "node": "Assign IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Priority": {
+      "main": [
+        [
+          {
+            "node": "Assign IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign IDs": {
+      "main": [
+        [
+          {
+            "node": "Write Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Findings": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}

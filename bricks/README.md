@@ -42,7 +42,17 @@ the freshness check makes it safe.
 | [`email-lead-qualifier/`](email-lead-qualifier/) | `[email_plugin]` | BASE | built |
 | [`llm-lead-enrichment/`](llm-lead-enrichment/) | `[llmenri_plugin]` | ADD-ON | built |
 | [`community-lead-radar/`](community-lead-radar/) | `[dirnotif_plugin]` | BASE | built |
-| [`seo-improver/`](seo-improver/) | `[seo_improver_plugin]` / `[seo_pr_apply]` | BASE | **placeholder — In Build** (core components in `planned[]`) |
+| [`keyword-research/`](keyword-research/) | `[keyword_research_plugin]` | BASE | built |
+| [`technical-audit/`](technical-audit/) | `[technical_audit_plugin]` | BASE | built |
+| [`seo-improver/`](seo-improver/) | `[seo_improver_plugin]` / `[seo_pr_apply]` | BASE | built (Phase-1 rank tracker; `[seo_pr_apply]` in `planned[]`) |
+| [`seo-audit-orchestrator/`](seo-audit-orchestrator/) | `[seo_audit_orchestrator_plugin]` | BASE | built (SEO-suite goal endpoint) |
+| [`content-tracker/`](content-tracker/) | `[content_tracker_plugin]` | BASE | built (SEO-suite; on-page content, new-site-friendly) |
+| [`competitor-gap/`](competitor-gap/) | `[competitor_gap_plugin]` | BASE | built (SEO-suite; competitor/SERP gaps) |
+| [`seo-monitor/`](seo-monitor/) | `[seo_monitor_plugin]` | BASE | built (SEO-suite; change/regression alerts) |
+| [`backlinks/`](backlinks/) | `[backlinks_plugin]` | BASE | built (SEO-suite; referring domains + link gaps) |
+| [`content-gen/`](content-gen/) | `[content_gen_plugin]` | BASE | built (SEO-suite; SERP-grounded content briefs) |
+| [`reporting-digest/`](reporting-digest/) | `[reporting_digest_plugin]` | BASE | built (SEO-suite; weekly digest over the audit orchestrator output) |
+| [`gsc-csv/`](gsc-csv/) | `[gsc_csv_plugin]` | BASE | built (SEO-suite; GSC CSV stopgap → CTR / cannibalization findings) |
 
 *Tessera is a full-stack project, not a `[*_plugin]` brick, and is intentionally
 excluded from `bricks/`.*
