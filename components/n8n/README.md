@@ -42,6 +42,10 @@ when a template is instantiated for a specific job.
 | [`workflows/outbound-verdict-callback.json`](workflows/outbound-verdict-callback.json) | Outbound Dispatch + Verdict Callback | push to external webapp → read verdict → map → re-enter pipeline. (`[TESSERA] OUTBOUND WF1`.) |
 | [`workflows/shopify-webhook-reread.json`](workflows/shopify-webhook-reread.json) | Shopify Webhook → Re-read/Invalidate | Shopify HMAC verify (base64) → live re-read / cache invalidate → respond. **Never mirrors** order/stock/payment state. |
 | [`workflows/sms-state-machine.json`](workflows/sms-state-machine.json) | SMS/WhatsApp State Machine | inbound → STOP/dedupe guards → identity/session lookup → AI decision → outbound + provider flag. (`[SCARLET]` lineage.) |
+| [`workflows/keyword-research.json`](workflows/keyword-research.json) | Keyword Research (`[keyword_research_plugin]`) | webhook → dual HMAC verify → 401 gate → signed 202 ack → spend guard → DataForSEO Labs keyword_ideas + bulk difficulty (object-first) → fail-open LLM cluster/intent → stable-ID keyword ledger UPSERT → signed notify. |
+| [`workflows/technical-audit.json`](workflows/technical-audit.json) | Technical Site Audit (`[technical_audit_plugin]`) | schedule → Confirm Config → spend guard → DataForSEO on-page + PageSpeed CWV → stable-ID issues → fail-open LLM synthesis → findings-ledger UPSERT → signed notify. |
+| [`workflows/seo-improver.json`](workflows/seo-improver.json) | SEO Improver rank tracker (`[seo_improver_plugin]`) | weekly schedule → spend guard → DataForSEO ranked-keywords → WoW movement → deterministic heuristics (STRIKE/CANN/DECAY) → fail-open drafting seam → rank-snapshot + findings UPSERT → signed digest. |
+| [`workflows/seo-audit-orchestrator.json`](workflows/seo-audit-orchestrator.json) | SEO Audit Orchestrator (`[seo_audit_orchestrator_plugin]`) | webhook → verify → ack → `executeWorkflow` dispatch to the child SEO bricks → read ledgers → normalize → dedup → prioritize → fail-open LLM exec-summary → run + work-queue UPSERT → signed top-N notify. |
 
 ## Conventions baked into every template
 

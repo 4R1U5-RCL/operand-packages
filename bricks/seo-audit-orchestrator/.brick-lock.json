@@ -1,0 +1,15 @@
+{
+  "brick": "seo-audit-orchestrator",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/seo-audit-orchestrator.json": "18d5fc5c43bb06f9d49acbb9012e2f08e9e35abd9a1b94f1307ff23eb10c1fa5",
+    "n8n/workflows/keyword-research.json": "caf79053ea1a182e17e807ab810c45512a8176e89c66eb935979574f33e9fa2f",
+    "n8n/workflows/technical-audit.json": "7f61c0d7ecd3d8e678ccb78cd2db1bab87c8983afc5c53b6df821f5c277b5890",
+    "n8n/workflows/seo-improver.json": "77463625cda5c26311bb20bffa59aa51eb1018b31a8d204f250d40c838eca4d1",
+    "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
+    "supabase/templates/seo-audit-runs.sql": "88d6ad46fa5a24e355f2403c1d79704438bc3e90df4b99720e06030f770f7ba2",
+    "supabase/templates/keyword-research.sql": "2c307c53e1dccc8cf7710d5d206b157a496dfb8a87d7725f8b0bde6fc8ee8989",
+    "supabase/templates/technical-audit.sql": "7033f52e13b7d6208cbfee0522316ea8b637ce758776e831689b172f45f088c6",
+    "supabase/templates/seo-findings.sql": "c525af879ccdb5b227fa891876b44536f73ef5e3d517fac2ac6e5cfccbf6c23d"
+  }
+}

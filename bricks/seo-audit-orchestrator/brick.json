@@ -1,0 +1,19 @@
+{
+  "name": "seo-audit-orchestrator",
+  "plugin": "[seo_audit_orchestrator_plugin]",
+  "title": "SEO audit orchestrator (goal endpoint)",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/seo-audit-orchestrator",
+  "components": [
+    "n8n/workflows/seo-audit-orchestrator.json",
+    "n8n/workflows/keyword-research.json",
+    "n8n/workflows/technical-audit.json",
+    "n8n/workflows/seo-improver.json",
+    "Webapp/spend-gate",
+    "supabase/templates/seo-audit-runs.sql",
+    "supabase/templates/keyword-research.sql",
+    "supabase/templates/technical-audit.sql",
+    "supabase/templates/seo-findings.sql"
+  ],
+  "planned": []
+}
