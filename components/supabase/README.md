@@ -45,9 +45,11 @@ the `public` schema with no client values and no secrets. Every template is
 | [`templates/seo-monitor.sql`](templates/seo-monitor.sql) | (3) derived history | The `[seo_monitor_plugin]` brick's isolated PAIR — `tmpl_seo_monitor_snapshots` (per-URL diff baseline) + `tmpl_seo_monitor_events` (classified change events). Append point-in-time history; server-write-only; no public read surface. |
 | [`templates/backlinks.sql`](templates/backlinks.sql) | (1) app data | `tmpl_seo_backlink_findings` — grounded referring-domain / link-gap / authority ledger for the `[backlinks_plugin]` brick. Server-write-only; `on_conflict (tenant, finding_id, run_date)`; no public read surface. |
 | [`templates/content-gen.sql`](templates/content-gen.sql) | (1) app data | `tmpl_seo_content_briefs` — DRAFT-FIRST SERP-grounded content-brief ledger for the `[content_gen_plugin]` brick. Server-write-only; `on_conflict (tenant, brief_id, run_date)`; no public read surface. |
+| [`templates/reporting-digest.sql`](templates/reporting-digest.sql) | (1) app data | `tmpl_seo_report_log` — the `[reporting_digest_plugin]` brick's own digest-run ledger (one row per delivered report, the fresh-period dedup guard). Server-write-only; no public read surface. Reads the orchestrator's `seo-audit-runs` tables but owns only this log. |
+| [`templates/gsc-csv.sql`](templates/gsc-csv.sql) | (1) app data | The `[gsc_csv_plugin]` brick's isolated PAIR — `tmpl_gsc_performance` (normalized GSC Performance-export rows, `on_conflict (tenant, property, query, page, date)`) + `tmpl_seo_gsc_findings` (derived CTR-outlier / cannibalization findings). Server-write-only; no public read surface. |
 
-Sixteen templates create **nineteen tables** (`child-owned-via-parent`,
-`seo-audit-runs` and `seo-monitor` each create two).
+Eighteen templates create **twenty-two tables** (`child-owned-via-parent`,
+`seo-audit-runs`, `seo-monitor` and `gsc-csv` each create two).
 
 ## Conventions baked into every template
 
