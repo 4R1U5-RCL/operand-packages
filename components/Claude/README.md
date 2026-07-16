@@ -21,7 +21,8 @@ side, each as its own subfolder with a `SKILL.md` entry point:
 | [`audit/`](audit/) | ATT&CK × ISO 27001 × SOC 2 security verification for the studio stack — a deterministic check core with three entry points (agent skill, CI gate, scheduled runner). Every check is self-guarded so a pass is earned, never assumed. |
 | [`hygiene/`](hygiene/) | Config/codebase hygiene across three pluggable profiles (`claude` home-tree relocation, `codebase` git-aware backup + junk-drift report, `llm-artifacts` transcript backup). `cleanup` drift detector + self-verifying `backup`; report-only on non-`claude` profiles. |
 | [`consult/`](consult/) | Multi-model cross-validation — `research` + `validate` over one LiteLLM chain (base → GPT-5 → Gemini, optional Perplexity). A corroborated/HIGH verdict needs the tiers to have actually responded, else `unknown` — never a fabricated answer. |
-| [`notify/`](notify/) | Claude Code → Telegram notifier. A `Notification`/`Stop` hook POSTs a signed event to the hosted `[STUDIO_NOTIFICATIONS]` n8n workflow, which pings Telegram (🟡 needs input / 🟢 done). Header-Auth + HMAC-signed. |
+| [`notify/`](notify/) | Claude Code → Telegram notifier. A `Notification`/`Stop` hook POSTs a signed event to the studio's hosted notifications n8n workflow, which pings Telegram (🟡 needs input / 🟢 done). Header-Auth + HMAC-signed. |
+| [`ops-agents/`](ops-agents/) | Scheduled read-only estate-sweep agents — a nightly Dependabot + audit signal gather across the 4R1U5-RCL repos, emitted as a Telegram digest, that DEFERS every guarded write (`gh … merge` / `git push`) to the main session. Dependency-free `.mjs` (Node built-ins only), DRY-RUN by default; `--apply` only ARMS the deferred plan (never performs guarded I/O here) and `--selftest` proves no guarded write escapes in-process. |
 
 ## Prompt skills
 
