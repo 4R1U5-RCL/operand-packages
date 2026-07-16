@@ -26,7 +26,7 @@ and the [Freshness](#freshness-no-drift) section below.
 ## `components/` layout
 
 - **[`components/Claude/`](components/Claude/)** — agent-side tooling for the studio:
-  4 code packages + 10 prompt skills (see
+  5 code packages + 10 prompt skills (see
   [`components/Claude/README.md`](components/Claude/README.md)).
 - **[`components/Webapp/`](components/Webapp/)** — reusable web-app feature-packages
   extracted from Tessera (11 packages — see
@@ -52,7 +52,8 @@ preflight). Full index in [`Claude/README.md`](components/Claude/README.md); the
 | [`Claude/audit/`](components/Claude/audit/) | ATT&CK × ISO 27001 × SOC 2 security verification for the studio stack — a deterministic check core with three entry points (agent skill, CI gate, scheduled runner). Every check is self-guarded so a pass is earned, never assumed. |
 | [`Claude/hygiene/`](components/Claude/hygiene/) | Config/codebase hygiene across three pluggable profiles (`claude` home-tree relocation, `codebase` git-aware backup + junk-drift report, `llm-artifacts` transcript backup). `cleanup` drift detector + self-verifying `backup`; report-only on non-`claude` profiles. Self-guarded so a pass is earned. |
 | [`Claude/consult/`](components/Claude/consult/) | Multi-model cross-validation — `research` + `validate` over one LiteLLM chain (base → GPT-5 → Gemini, optional Perplexity). Self-guarded offline; a corroborated/HIGH verdict needs the tiers to have actually responded, else `unknown` — never a fabricated answer. |
-| [`Claude/notify/`](components/Claude/notify/) | Claude Code → Telegram notifier. A `Notification`/`Stop` hook POSTs a signed event to the hosted `[STUDIO_NOTIFICATIONS]` n8n workflow, which pings Telegram (🟡 needs input / 🟢 done). Header-Auth + HMAC-signed; the live channel is proven via the n8n executions API. |
+| [`Claude/notify/`](components/Claude/notify/) | Claude Code → Telegram notifier. A `Notification`/`Stop` hook POSTs a signed event to the studio's hosted notifications n8n workflow, which pings Telegram (🟡 needs input / 🟢 done). Header-Auth + HMAC-signed; the live channel is proven via the n8n executions API. |
+| [`Claude/ops-agents/`](components/Claude/ops-agents/) | Durable home for the scheduled **ops-agents** — read-only gatherers that sweep the estate (Dependabot PRs + per-repo audit signal) and emit a Telegram digest, **deferring every guarded write** to the main session. Dependency-free `.mjs` (vendored guard = faithful port of `@studio/agent-kit/guard`); dry-run is the default, `--apply` only ARMS the deferred plan, `--selftest` proves no guarded write escapes in-process. |
 
 | Prompt skill | What it does |
 |--------------|--------------|
@@ -90,17 +91,16 @@ view, migrations, and a doc of the matching n8n node.
 ## `n8n/` — hosted workflow templates
 
 Reusable n8n workflow **templates** for the studio's OWN hosted instance —
-importable node-graph definitions distilled from the live workflows
-(`[STUDIO_TESSERA]`, `[STUDIO_NOTIFICATIONS]`, `[TESSERA]`, `[MOSAIC]`,
-`[SCARLET]`). **Boundary, the other side of `Webapp/`:** `Webapp/` ships only the
+importable node-graph definitions distilled from the studio's live hosted
+workflows. **Boundary, the other side of `Webapp/`:** `Webapp/` ships only the
 signed *hook/route* a client app uses to call a hosted workflow; `n8n/` is the
 hosted *definitions* themselves — studio-ops recurring IP, never copied into a
 client repo. Templates ship **inactive** with **unbound credential slots**;
 binding creds + activating is a deliberate human/ops step.
 
 Authored as code in the studio monorepo (`@studio/n8n-templates` primitives + the
-harness `n8n-template` app-class) and provisioned to the hosted `PACKAGE/Templates`
-project; this dir is the published, importable snapshot. See
+harness `n8n-template` app-class) and provisioned to the studio's own hosted n8n
+instance; this dir is the published, importable snapshot. See
 [`n8n/README.md`](components/n8n/README.md).
 
 | Template | Pattern |
@@ -119,7 +119,7 @@ project; this dir is the published, importable snapshot. See
 ## `supabase/` — schema templates
 
 Reusable Supabase **schema templates** — one idempotent RLS migration per
-[`packages/db`](https://github.com/4R1U5-RCL/studio) §8.1 data shape, distilled
+the studio monorepo's `packages/db` §8.1 data shape, distilled
 into client-agnostic `tmpl_*` DDL. **Boundary:** only the three §8.1 shapes (app
 data Shopify doesn't own / a short-lived cache reconciled to Shopify / derived
 history) — **never** a mirror of Shopify's live commercial state. RLS-by-default +
@@ -127,9 +127,9 @@ REVOKE discipline are baked into every table. Studio-ops reference schema, never
 copied into a client repo.
 
 Authored as code in the studio monorepo (`@studio/supabase-templates` primitives +
-the harness `supabase-template` app-class) and provisioned to the
-`studio/templates` project (`uzedswjxbgiuymleteud`); this dir is the published,
-importable snapshot. See [`supabase/README.md`](components/supabase/README.md).
+the harness `supabase-template` app-class) and provisioned to the studio's own
+hosted Supabase templates project; this dir is the published, importable
+snapshot. See [`supabase/README.md`](components/supabase/README.md).
 
 | Template | Shape | Pattern |
 |----------|-------|---------|
