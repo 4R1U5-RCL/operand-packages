@@ -1,0 +1,13 @@
+{
+  "name": "seo-monitor",
+  "plugin": "[seo_monitor_plugin]",
+  "title": "SEO health monitor",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/seo-monitor",
+  "components": [
+    "n8n/workflows/seo-monitor.json",
+    "Webapp/spend-gate",
+    "supabase/templates/seo-monitor.sql"
+  ],
+  "planned": []
+}

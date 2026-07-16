@@ -1,0 +1,946 @@
+{
+  "name": "[TEMPLATE] [competitor_gap_plugin] Competitor / SERP Gap — DataForSEO Labs → gaps → cluster/prioritize → notify",
+  "nodes": [
+    {
+      "id": "gap-webhook",
+      "name": "Gap Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "competitor-gap",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "verify-hmac",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst MAX_SKEW_MS = 300000;\nconst SIG_HEADER = \"x-n8n-signature\";\nconst TS_HEADER = \"x-n8n-timestamp\";\nconst STATIC_HEADER = \"x-static-token\";\nconst hmac = (d) => crypto.createHmac('sha256', SECRET).update(d).digest('hex');\nconst safeEq = (aHex, bHex) => {\n  if (!aHex || !bHex) return false;\n  const a = Buffer.from(String(aHex)), b = Buffer.from(String(bHex));\n  return a.length === b.length && crypto.timingSafeEqual(a, b);\n};\n// TE-16: recover the EXACT signed bytes — rawBody when n8n captured it, else a\n// careful re-stringify of the parsed body (must round-trip byte-identical).\nconst rawOf = (j) => (j.rawBody != null) ? j.rawBody.toString() : JSON.stringify(j.body);\n\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const headers = j.headers || {};\n  const raw = rawOf(j);\n  let ok = false;\n  // Fail-closed: an unconfigured secret can never verify (and never throws).\n  if (SECRET) {\n  const sig = headers[SIG_HEADER];\n  const ts = headers[TS_HEADER];\n  if (ts) {\n    // timestamp PRESENT -> studio form: replay-guarded HMAC(`${ts}.${body}`).\n    const n = Number(ts);\n    if (sig && Number.isFinite(n) && Math.abs(Date.now() - n) <= MAX_SKEW_MS) {\n      ok = safeEq(hmac(ts + '.' + raw), sig);\n    }\n  } else {\n    // timestamp ABSENT -> harness verify-n8n form: bare-body HMAC(`${body}`),\n    // only the signature header present.\n    ok = safeEq(hmac(raw), sig);\n  }\n  }\n  // n8n Cloud freezes Code-node input items (IN-25): in-place mutations are\n  // silently dropped — always RETURN new items.\n  const item = { json: Object.assign({}, j, { __authok: ok }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "auth-gate",
+      "name": "Auth Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "auth-gate-cond",
+              "leftValue": "={{ $json.__authok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "reject-401",
+      "name": "Reject 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"invalid or missing signature\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "sign-ack",
+      "name": "Sign Ack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const requestId = (j.body && j.body.request_id) || j.request_id || null;\n  const body = { ok: true, request_id: requestId };\n  const payload = JSON.stringify(body);\n  // n8n Cloud freezes Code-node input items (IN-25): in-place writes are silently\n  // dropped, so the respond node would read an item WITHOUT __sig and answer\n  // unsigned. Always RETURN a NEW item carrying the signing fields (and binary).\n  // Fail-open to UNSIGNED when the secret is unreachable — empty __sig rather than\n  // throw or sign with an empty key.\n  const item = { json: Object.assign({}, j, {\n    __body: body,\n    __ts: String(Date.now()),\n    __sig: SECRET ? crypto.createHmac('sha256', SECRET).update(payload).digest('hex') : '',\n  }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "ack-202-signed",
+      "name": "Ack 202 Signed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        -40
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.__body }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "x-n8n-signature",
+                "value": "={{ $json.__sig }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "every-week",
+      "name": "Every Week",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        220
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nfunction host(d) { return d ? String(d).replace(/^https?:\\/\\//, '').replace(/^www\\./, '').split('/')[0].trim() : null; }\nfunction toList(s) { return String(s || '').split(',').map((x) => host(x)).filter(Boolean); }\nconst MAX = 5;\nconst items = $input.all();\nconst src = (items[0] && items[0].json) || {};\nconst body = (src.body && typeof src.body === 'object') ? src.body : src;\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\nlet domain = host(safe(() => ($vars.SEO_TARGET_DOMAIN)));\nif (body && body.domain) { const bd = host(safe(() => body.domain)); if (bd) domain = bd; }\nlet competitors = toList(safe(() => ($vars.SEO_COMPETITOR_DOMAINS)));\nif (body && body.competitor_domains) { const bc = Array.isArray(body.competitor_domains) ? body.competitor_domains.join(',') : body.competitor_domains; const bl = toList(bc); if (bl.length) competitors = bl; }\n// Never intersect the target with itself; bound the set.\ncompetitors = competitors.filter((c) => c && c !== domain).slice(0, MAX);\nconst location = safe(() => (($vars.SEO_LOCATION_NAME || 'United States'))) || 'United States';\nconst language = safe(() => (($vars.SEO_LANGUAGE_NAME || 'English'))) || 'English';\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nconst runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\nconst hasDomain = !!domain;\nreturn [{ json: Object.assign({}, src, {\n  __tenant: tenant,\n  __domain: domain,\n  __config_competitors: competitors,\n  __location: location,\n  __language: language,\n  __run_date: day(runMs),\n  __facts_ok: hasDomain ? null : false,\n  __facts_reason: hasDomain ? null : 'no_domain',\n}) }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "spend-read",
+      "name": "Spend Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/global_send_quotas?select=spend_usd,count&channel=eq.dataforseo&sender_id=eq.dataforseo-daily&window_start=eq.{{ encodeURIComponent(new Date().toISOString().slice(0,10)) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "spend-gate",
+      "name": "Spend Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"SEO_DATAFORSEO_DAILY_CAP\"));\nconst ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const row = rows[0] || {};\n  const spent = Number(row.spend_usd != null ? row.spend_usd : (row.count != null ? row.count : 0)) || 0;\n  // No cap configured → do not block (fail-open); a finite cap gates at the boundary.\n  const under = !Number.isFinite(CAP) || CAP <= 0 ? true : spent < CAP;\n  out.push({ json: Object.assign({}, c, { __spend_under_cap: under }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "auto-derive",
+      "name": "Auto-Derive?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "auto-derive-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true && $json.__facts_ok !== false && (($json.__config_competitors || []).length === 0) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "find-competitors",
+      "name": "Find Competitors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/competitors_domain/live",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ target: $json.__domain, location_name: $json.__location, language_name: $json.__language, limit: 5, exclude_top_domains: true, order_by: ['intersections,desc'] }]) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cred-ref:dataforseo",
+          "name": "[OPERAND] DataForSEO Basic"
+        }
+      }
+    },
+    {
+      "id": "extract-competitors",
+      "name": "Extract Competitors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const MAX = 5;\nconst ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let derived = [];\n  let reason = null;\n  if (status === 401 || status === 403) { reason = 'dataforseo_unauthorized'; }\n  else if (status < 200 || status >= 300) { reason = 'dataforseo_error_' + (status || 'unknown'); }\n  else if (!parsed || !Array.isArray(parsed.tasks)) { reason = 'dataforseo_unparseable'; }\n  else {\n    const task = parsed.tasks[0] || {};\n    const taskStatus = Number(task.status_code || 0);\n    const result = Array.isArray(task.result) ? task.result[0] : null;\n    const list = result && Array.isArray(result.items) ? result.items : null;\n    if (taskStatus && taskStatus !== 20000) { reason = 'dataforseo_task_' + taskStatus; }\n    else if (!list) { reason = 'dataforseo_empty'; }\n    else {\n      const seen = {};\n      for (const it of list) {\n        if (!it || typeof it !== 'object') continue;\n        const d = (it.domain != null) ? String(it.domain).replace(/^www\\./, '').trim() : null;\n        if (!d || d === c.__domain || seen[d]) continue;\n        seen[d] = true;\n        derived.push(d);\n        if (derived.length >= MAX) break;\n      }\n      if (!derived.length) reason = 'dataforseo_no_competitors';\n    }\n  }\n  out.push({ json: Object.assign({}, c, { __derived_competitors: derived, __derive_reason: reason }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "use-configured-competitors",
+      "name": "Use Configured Competitors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  return { json: Object.assign({}, j, { __derived_competitors: [], __derive_reason: null }) };\n});"
+      }
+    },
+    {
+      "id": "merge-competitors",
+      "name": "Merge Competitors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const MAX = 5;\nreturn $input.all().map((it) => {\n  const j = it.json || {};\n  const configured = Array.isArray(j.__config_competitors) ? j.__config_competitors : [];\n  const derived = Array.isArray(j.__derived_competitors) ? j.__derived_competitors : [];\n  const seen = {};\n  const competitors = [];\n  for (const d of configured.concat(derived)) {\n    if (!d || d === j.__domain || seen[d]) continue;\n    seen[d] = true; competitors.push(d);\n    if (competitors.length >= MAX) break;\n  }\n  const patch = { __competitors: competitors };\n  // An honest blocker only when we have a domain but NO competitor to compare against.\n  if (!competitors.length && j.__facts_ok !== false) {\n    patch.__facts_ok = false;\n    patch.__facts_reason = j.__derive_reason || 'no_competitors';\n  }\n  return { json: Object.assign({}, j, patch) };\n});"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "pull-gaps",
+      "name": "Pull Gaps?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pull-gaps-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true && $json.__facts_ok !== false && (($json.__competitors || []).length > 0) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "skip-gaps",
+      "name": "Skip Gaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        180
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const reason = j.__facts_reason || (j.__spend_under_cap === false ? 'dataforseo_spend_cap' : 'no_competitors');\n  return { json: Object.assign({}, j, { __facts_ok: false, __facts_reason: reason, __gaps: [] }) };\n});"
+      }
+    },
+    {
+      "id": "domain-intersection",
+      "name": "Domain Intersection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2860,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/domain_intersection/live",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 90000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__competitors || []).map((comp) => ({ target1: $json.__domain, target2: comp, location_name: $json.__location, language_name: $json.__language, intersections: false, item_types: ['organic'], limit: 200, order_by: ['keyword_data.keyword_info.search_volume,desc'] }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cred-ref:dataforseo",
+          "name": "[OPERAND] DataForSEO Basic"
+        }
+      }
+    },
+    {
+      "id": "extract-gaps",
+      "name": "Extract Gaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function firstNum() { for (const v of arguments) { const n = Number(v); if (Number.isFinite(n)) return Math.round(n); } return null; }\nconst ctx = $('Merge Competitors').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  // A prior honest skip short-circuits — never a fabricated pull result.\n  if (c.__facts_ok === false) { out.push({ json: Object.assign({}, c, { __gaps: [] }) }); continue; }\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let factsOk = false;\n  let reason = null;\n  const gaps = [];\n  if (status === 401 || status === 403) { reason = 'dataforseo_unauthorized'; }\n  else if (status < 200 || status >= 300) { reason = 'dataforseo_error_' + (status || 'unknown'); }\n  else if (!parsed || !Array.isArray(parsed.tasks)) { reason = 'dataforseo_unparseable'; }\n  else {\n    const seen = {};\n    for (const task of parsed.tasks) {\n      const taskStatus = Number((task && task.status_code) || 0);\n      if (taskStatus && taskStatus !== 20000) { if (!reason) reason = 'dataforseo_task_' + taskStatus; continue; }\n      const result = task && Array.isArray(task.result) ? task.result[0] : null;\n      // target2 (the competitor domain this task compared against) rides in the result meta.\n      const competitor = result && (result.target2 || result.se_type_target2) ? String(result.target2 || result.se_type_target2).replace(/^www\\./, '') : null;\n      const list = result && Array.isArray(result.items) ? result.items : null;\n      if (!list) continue;\n      for (const it of list) {\n        if (!it || typeof it !== 'object') continue;\n        // domain_intersection items carry the keyword + a first/second serp element per domain.\n        const kwData = it.keyword_data || it;\n        const kwInfo = (kwData && kwData.keyword_info) || {};\n        const kw = (kwData && kwData.keyword != null) ? String(kwData.keyword) : (it.keyword != null ? String(it.keyword) : null);\n        if (!kw) continue;\n        // first_domain_serp_element = target1 (our target); second = target2 (the competitor).\n        const first = it.first_domain_serp_element || it.first_domain || {};\n        const second = it.second_domain_serp_element || it.second_domain || {};\n        const targetRank = firstNum(first.rank_absolute, first.rank_group);\n        const competitorRank = firstNum(second.rank_absolute, second.rank_group);\n        const vol = firstNum(kwInfo.search_volume);\n        const kdRaw = Number(kwInfo.keyword_difficulty != null ? kwInfo.keyword_difficulty : kwData.keyword_difficulty);\n        const kd = Number.isFinite(kdRaw) ? kdRaw : null;\n        const comp = competitor || (it.se_type ? null : null);\n        const dedupeKey = kw + '|' + (comp || '');\n        if (seen[dedupeKey]) continue;\n        seen[dedupeKey] = true;\n        gaps.push({\n          keyword: kw,\n          competitor: comp,\n          competitor_rank: competitorRank,\n          target_rank: targetRank, // null = pure gap (target does not rank)\n          search_volume: vol,\n          keyword_difficulty: kd,\n        });\n      }\n    }\n    factsOk = gaps.length > 0;\n    if (!factsOk && !reason) reason = 'dataforseo_no_gaps';\n  }\n  out.push({ json: Object.assign({}, c, {\n    __facts_ok: factsOk,\n    __facts_reason: reason,\n    __gaps: gaps,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "prioritize",
+      "name": "Prioritize?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "prioritize-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_GAP_PRIORITIZE_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cluster-prioritize",
+      "name": "Cluster + Prioritize",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3520,
+        -160
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_GAP_PRIORITIZE_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach-priority",
+      "name": "Attach Priority",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Extract Gaps').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const byKey = (p && typeof p === 'object' && p.priority && typeof p.priority === 'object') ? p.priority : {};\n  const gaps = (Array.isArray(c.__gaps) ? c.__gaps : []).map((g) => {\n    const key = g.keyword + '|' + (g.competitor || '');\n    const e = byKey[key] || {};\n    const cluster = (typeof e.cluster_label === 'string' && e.cluster_label.trim()) ? e.cluster_label.trim().slice(0, 120) : null;\n    const scoreRaw = Number(e.priority_score);\n    const score = Number.isFinite(scoreRaw) ? scoreRaw : null;\n    const rec = (typeof e.recommendation === 'string' && e.recommendation.trim()) ? e.recommendation.trim().slice(0, 600) : null;\n    return Object.assign({}, g, { cluster_label: cluster, priority_score: score, recommendation: rec });\n  });\n  out.push({ json: Object.assign({}, c, { __gaps: gaps }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-priority",
+      "name": "Skip Priority",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const gaps = (Array.isArray(j.__gaps) ? j.__gaps : []).map((g) => Object.assign({}, g, { cluster_label: null, priority_score: null, recommendation: null }));\n  return { json: Object.assign({}, j, { __gaps: gaps }) };\n});"
+      }
+    },
+    {
+      "id": "assign-ids",
+      "name": "Assign IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const gaps = Array.isArray(j.__gaps) ? j.__gaps : [];\n  const rows = gaps.map((g) => {\n    // Grounded id: (keyword|competitor) — independent of the LLM cluster label.\n    const fid = 'GAP-' + ('00000000' + hash(String(g.keyword) + '|' + String(g.competitor || '')).toString(16)).slice(-8);\n    return Object.assign({}, g, { finding_id: fid });\n  });\n  out.push({ json: Object.assign({}, j, { __rows: rows }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-gaps",
+      "name": "Write Gaps",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4180,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_competitor_gaps?on_conflict=tenant,finding_id,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__rows || []).map((r) => ({ tenant: $json.__tenant, domain: $json.__domain, run_date: $json.__run_date, keyword: r.keyword, finding_id: r.finding_id, competitor: r.competitor, competitor_rank: r.competitor_rank, target_rank: r.target_rank, search_volume: r.search_volume, keyword_difficulty: r.keyword_difficulty, cluster_label: r.cluster_label, priority_score: r.priority_score, recommendation: r.recommendation, status: \"open\", evidence: { keyword: r.keyword, competitor: r.competitor, competitor_rank: r.competitor_rank, target_rank: r.target_rank, search_volume: r.search_volume, keyword_difficulty: r.keyword_difficulty, finding_id: r.finding_id } }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const rows = Array.isArray(j.__rows) ? j.__rows : [];\n  const factsOk = j.__facts_ok === true;\n  let message;\n  if (!factsOk) {\n    const why = j.__facts_reason ? (' (' + j.__facts_reason + ')') : '';\n    message = '🔍 Competitor gap — no gap data could be read for this run' + why +\n      '. No gaps are shown because none were returned from DataForSEO.';\n  } else {\n    const byComp = {};\n    for (const r of rows) { const cc = r.competitor || 'unknown'; byComp[cc] = (byComp[cc] || 0) + 1; }\n    const topComp = Object.keys(byComp).sort((a, b) => byComp[b] - byComp[a])[0] || 'n/a';\n    // Best opportunity: highest LLM priority_score, else a pure gap (target_rank null) with the\n    // highest volume / lowest difficulty. Difficulty null sorts last.\n    const opp = rows.slice().sort((a, b) => {\n      const pa = a.priority_score == null ? -1 : a.priority_score, pb = b.priority_score == null ? -1 : b.priority_score;\n      if (pa !== pb) return pb - pa;\n      const ga = a.target_rank == null ? 0 : 1, gb = b.target_rank == null ? 0 : 1;\n      if (ga !== gb) return ga - gb; // pure gaps first\n      const da = a.keyword_difficulty == null ? 101 : a.keyword_difficulty, db = b.keyword_difficulty == null ? 101 : b.keyword_difficulty;\n      if (da !== db) return da - db;\n      return (Number(b.search_volume) || 0) - (Number(a.search_volume) || 0);\n    })[0];\n    const oppTxt = opp ? (opp.keyword + ' (vs ' + (opp.competitor || '?') + ', vol ' + (opp.search_volume || 0) + (opp.keyword_difficulty != null ? ', kd ' + opp.keyword_difficulty : '') + (opp.target_rank == null ? ', pure gap' : ', you #' + opp.target_rank) + ')') : 'n/a';\n    message = '🔍 Competitor gap — ' + rows.length + ' gap(s) for \"' + (j.__domain || '?') +\n      '\". Biggest rival: ' + topComp + '. Best opportunity: ' + oppTxt;\n  }\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'competitor_gap',\n    tenant: j.__tenant || null,\n    domain: j.__domain || null,\n    run_date: j.__run_date || null,\n    facts_ok: factsOk,\n    gap_count: rows.length,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4620,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Gap Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC": {
+      "main": [
+        [
+          {
+            "node": "Auth Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Gate": {
+      "main": [
+        [
+          {
+            "node": "Sign Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Ack": {
+      "main": [
+        [
+          {
+            "node": "Ack 202 Signed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack 202 Signed": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Week": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Spend Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Read": {
+      "main": [
+        [
+          {
+            "node": "Spend Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Gate": {
+      "main": [
+        [
+          {
+            "node": "Auto-Derive?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Derive?": {
+      "main": [
+        [
+          {
+            "node": "Find Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Configured Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Competitors": {
+      "main": [
+        [
+          {
+            "node": "Extract Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Competitors": {
+      "main": [
+        [
+          {
+            "node": "Merge Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Configured Competitors": {
+      "main": [
+        [
+          {
+            "node": "Merge Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Competitors": {
+      "main": [
+        [
+          {
+            "node": "Pull Gaps?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull Gaps?": {
+      "main": [
+        [
+          {
+            "node": "Domain Intersection",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Domain Intersection": {
+      "main": [
+        [
+          {
+            "node": "Extract Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Gaps": {
+      "main": [
+        [
+          {
+            "node": "Prioritize?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Gaps": {
+      "main": [
+        [
+          {
+            "node": "Prioritize?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prioritize?": {
+      "main": [
+        [
+          {
+            "node": "Cluster + Prioritize",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cluster + Prioritize": {
+      "main": [
+        [
+          {
+            "node": "Attach Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Priority": {
+      "main": [
+        [
+          {
+            "node": "Assign IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Priority": {
+      "main": [
+        [
+          {
+            "node": "Assign IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign IDs": {
+      "main": [
+        [
+          {
+            "node": "Write Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Gaps": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}

@@ -1,0 +1,13 @@
+{
+  "name": "competitor-gap",
+  "plugin": "[competitor_gap_plugin]",
+  "title": "Competitor / SERP gap",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/competitor-gap",
+  "components": [
+    "n8n/workflows/competitor-gap.json",
+    "Webapp/spend-gate",
+    "supabase/templates/competitor-gap.sql"
+  ],
+  "planned": []
+}
