@@ -1,0 +1,9 @@
+{
+  "brick": "content-gen",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/content-gen.json": "f4d89a565ca7a01808202a9cdd754b199cd601f589cb9f353732caf4907a8413",
+    "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
+    "supabase/templates/content-gen.sql": "5923eb86565d487e5c30d600145fcfc707df615c193ff41dda2c08232558342f"
+  }
+}

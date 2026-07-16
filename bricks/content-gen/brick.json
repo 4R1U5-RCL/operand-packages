@@ -1,0 +1,13 @@
+{
+  "name": "content-gen",
+  "plugin": "[content_gen_plugin]",
+  "title": "Content Generation / Briefs",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/content-gen",
+  "components": [
+    "n8n/workflows/content-gen.json",
+    "Webapp/spend-gate",
+    "supabase/templates/content-gen.sql"
+  ],
+  "planned": []
+}
