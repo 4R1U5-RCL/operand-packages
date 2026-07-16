@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — 2026-07-16 (brick wave + SEO suite export)
+
+Curatorial export of a brick wave + the eight-brick SEO suite into the two-view
+layout, mirroring the `seo-improver` placeholder convention (shared generic
+components + a rich `planned[]` for the not-yet-snapshotted core).
+
+- **New wave bricks:** `telegram-triage` (`[triage_plugin]`, ADD-ON, reusable
+  verdict layer, owns no table), `content-wall` (`[content_wall_plugin]`, BASE,
+  generalizes Vouch), `scheduled-digest` (`[scheduled_digest]`, BASE, public:
+  Digest).
+- **Eight SEO bricks** (each its own plugin, not one suite folder):
+  `keyword-research`, `technical-audit`, `seo-audit-orchestrator` (ADD-ON,
+  composing), `content-tracker`, `competitor-gap`, `seo-monitor`, `backlinks`,
+  `content-gen`.
+- **Three new generic components** (genuine reusable shapes the library lacked):
+  `n8n/workflows/source-monitor-poller.json` (durable-cursor ingest engine,
+  extracted from the Radar scraper base; consumed by `seo-monitor`),
+  `supabase/templates/security-barrier-view.sql` (tenant-scoped public-READ
+  barrier view — the content-wall publish shape),
+  `supabase/templates/idempotent-run-log.sql` (per-`(client_id, period_key)` send
+  ledger with a UNIQUE exactly-once arbiter — the scheduled-digest send-log shape).
+  All `active:false`, creds-stripped, generic.
+- **Updated bricks:** `llm-lead-enrichment` (additive `return_partial` mode +
+  `scoringProfile` param, both non-breaking) and `community-lead-radar`
+  (source-monitor engine extraction reflected).
+- `assemble-bricks.mjs` + `check-brick-freshness.mjs` re-run green across all 16
+  bricks.
+
 ## v0.5.0 — 2026-07-16
 
 Repo restructured into a two-view layout: **`components/`** (the layer view —

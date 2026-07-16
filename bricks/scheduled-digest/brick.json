@@ -1,0 +1,19 @@
+{
+  "name": "scheduled-digest",
+  "plugin": "[scheduled_digest]",
+  "title": "Digest",
+  "kind": "BASE",
+  "status": "built",
+  "portfolio": "https://operandstudio.com/portfolio/scheduled-digest",
+  "spec": "SPEC_operand-scheduled-digest_2026-07-16.md",
+  "components": [
+    "n8n/workflows/schedule-dispatcher.json",
+    "n8n/workflows/notification-fanout.json",
+    "Webapp/spend-gate",
+    "supabase/templates/idempotent-run-log.sql"
+  ],
+  "planned": [
+    "scheduled-digest workflow builder — the reusable read → summarize → deliver → log ENGINE that generalises the identical middle+tail of dirnotif-digest + analytics-digest; the caller (a typed CONSUMER) supplies the source-read + compose nose-cone via slots. Owns the Compute Period, before-delivery dedup, Extract-Facts grounding gate, fail-open LLM summary seam, delivery legs, and idempotent log; not yet snapshotted here (mapped to schedule-dispatcher for the cron spine + notification-fanout for the signed delivery leg)",
+    "tmpl_scheduled_digest_log SQL — the brick-exclusive send-log / run ledger (one row per client per period, UNIQUE(client_id, period_key) the exactly-once arbiter); the generic idempotent-run-log.sql snapshot shows its shape, the concrete brick table is not yet authored here"
+  ]
+}

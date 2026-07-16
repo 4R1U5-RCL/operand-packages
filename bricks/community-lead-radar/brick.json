@@ -5,6 +5,7 @@
   "kind": "BASE",
   "portfolio": "https://operandstudio.com/portfolio/community-lead-radar",
   "components": [
+    "n8n/workflows/source-monitor-poller.json",
     "n8n/workflows/schedule-dispatcher.json",
     "n8n/workflows/read-only-json-api.json",
     "n8n/workflows/llm-doc-pipeline-mono.json",
@@ -14,5 +15,7 @@
     "supabase/templates/public-capture.sql",
     "supabase/templates/derived-history.sql"
   ],
-  "planned": []
+  "planned": [
+    "source-monitor engine extraction — the reusable INGEST half of Radar's scraper base (schedule → read config → durable-cursor poll → per-adapter fetch → normalize → dedup → advance cursor) is extracted into the source-agnostic source-monitor-poller shape (now snapshotted at components/n8n/workflows/source-monitor-poller.json); Radar becomes one COMPOSITION of that engine + its own lead-qualifier + enrichment seam + notify. Future watch bricks (review-watch, changelog-monitor, job-board) reuse the same engine via config-driven SourceAdapter descriptors — config-not-code, no new scraper builder. The concrete extraction builder (_source-monitor-engine.ts) is not itself snapshotted here"
+  ]
 }

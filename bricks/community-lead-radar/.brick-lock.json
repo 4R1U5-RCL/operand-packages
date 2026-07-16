@@ -2,6 +2,7 @@
   "brick": "community-lead-radar",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
+    "n8n/workflows/source-monitor-poller.json": "abe5242076909bbfa808802358ed31afa2304385c564e969589d48edf6f14515",
     "n8n/workflows/schedule-dispatcher.json": "85d62dac67c1728aac65962ac3ad433915583a014b5ff8e6b203eb7a4b4de1d3",
     "n8n/workflows/read-only-json-api.json": "3c5c28531a5b503b3eca32209afda085363c9346147459f50a73eb007182c021",
     "n8n/workflows/llm-doc-pipeline-mono.json": "f4264450b18aa5089155c74687ea52162567f5d922f990158b94175ab2630607",

@@ -35,6 +35,8 @@ the `public` schema with no client values and no secrets. Every template is
 | [`templates/server-write-only-lock.sql`](templates/server-write-only-lock.sql) | (1) app data | Per-user table with **server-write-only** columns (e.g. `plan`/billing): owner reads/inserts/updates the row but `UPDATE` on the locked columns is REVOKEd from `anon`+`authenticated` — only `service_role`/the billing webhook writes them. |
 | [`templates/shopify-cache.sql`](templates/shopify-cache.sql) | (2) cache | Short-lived, deliberately-stale cache row (`ttl_seconds`/`fetched_at`), `service_role`-only. **Not a source of truth** — a miss re-fetches from Shopify, never "trust the cache". |
 | [`templates/derived-history.sql`](templates/derived-history.sql) | (3) derived history | Append-only point-in-time snapshots (stock-history). `service_role` inserts, `authenticated` reads to draw trends; `anon` never touches it. Net-new data Shopify doesn't retain — never a live mirror. |
+| [`templates/security-barrier-view.sql`](templates/security-barrier-view.sql) | (1) app data | Tenant-scoped **public-READ barrier view**: a `service_role`-only base table + a `security_barrier` view exposing ONLY the approved/published subset and ONLY the public (non-PII) columns, scoped by `client_id`. The publish half of a collect → moderate → **publish** loop (Wall-of-Love / content-wall class). `anon` reads the view, never the base. |
+| [`templates/idempotent-run-log.sql`](templates/idempotent-run-log.sql) | (3) derived history | **Idempotent run ledger**: one row per `(client_id, period_key)` with a UNIQUE index as the exactly-once **race arbiter** — a duplicate cron fire loses the INSERT (`on_conflict` no-op), so re-firing is a no-op. `service_role` writes; `authenticated` reads its history for a trend. The send-log for a scheduled digest/dispatch engine. |
 | [`templates/keyword-research.sql`](templates/keyword-research.sql) | (1) app data | `tmpl_seo_keyword_research` — grounded keyword ledger for the `[keyword_research_plugin]` brick. Server-write-only (RLS on, REVOKE ALL from anon/public, `service_role` policy only); no public read surface. |
 | [`templates/technical-audit.sql`](templates/technical-audit.sql) | (1) app data | `tmpl_seo_technical_findings` — grounded technical-findings ledger for the `[technical_audit_plugin]` brick. Server-write-only; no public read surface. |
 | [`templates/seo-rank-snapshots.sql`](templates/seo-rank-snapshots.sql) | (3) derived history | `tmpl_seo_rank_snapshots` — append point-in-time ranks (D-1) for the `[seo_improver_plugin]` rank tracker. Server-write-only. |
@@ -48,8 +50,9 @@ the `public` schema with no client values and no secrets. Every template is
 | [`templates/reporting-digest.sql`](templates/reporting-digest.sql) | (1) app data | `tmpl_seo_report_log` — the `[reporting_digest_plugin]` brick's own digest-run ledger (one row per delivered report, the fresh-period dedup guard). Server-write-only; no public read surface. Reads the orchestrator's `seo-audit-runs` tables but owns only this log. |
 | [`templates/gsc-csv.sql`](templates/gsc-csv.sql) | (1) app data | The `[gsc_csv_plugin]` brick's isolated PAIR — `tmpl_gsc_performance` (normalized GSC Performance-export rows, `on_conflict (tenant, property, query, page, date)`) + `tmpl_seo_gsc_findings` (derived CTR-outlier / cannibalization findings). Server-write-only; no public read surface. |
 
-Eighteen templates create **twenty-two tables** (`child-owned-via-parent`,
-`seo-audit-runs`, `seo-monitor` and `gsc-csv` each create two).
+Twenty templates create **twenty-five tables** (`child-owned-via-parent`,
+`seo-audit-runs`, `seo-monitor`, `gsc-csv` and `security-barrier-view` each create
+two — the last a `tmpl_barrier_base` table plus a `tmpl_barrier_public` view).
 
 ## Conventions baked into every template
 

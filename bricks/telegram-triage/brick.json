@@ -1,0 +1,19 @@
+{
+  "name": "telegram-triage",
+  "plugin": "[triage_plugin]",
+  "title": "Triage Receiver — Telegram callback verdict layer",
+  "kind": "ADD-ON",
+  "status": "built",
+  "portfolio": "https://operandstudio.com/portfolio/telegram-triage",
+  "spec": "SPEC_operand-telegram-triage_2026-07-16.md",
+  "components": [
+    "n8n/workflows/signed-webhook-base.json",
+    "n8n/workflows/outbound-verdict-callback.json",
+    "n8n/workflows/notification-fanout.json"
+  ],
+  "planned": [
+    "triage-receiver workflow builder — the generalized dual-auth (studio HMAC canary + Telegram bot-secret) callback receiver that PATCHes the pressed verdict back to the CALLER's own writeTable slot; not yet snapshotted here (closest shape is signed-webhook-base + outbound-verdict-callback)",
+    "triageKeyboard compose-side primitive — the helper a caller uses to emit the Telegram inline-button callback_data (<action>:<entity>:<id>) from the SAME buttons config the receiver's ACTION_MAP consumes (one source of truth, IN-30(B) skew structurally impossible); a compose-side helper, not a workflow snapshot",
+    "OWNS NO TABLE (SPEC §3 D-0) — v1 ships ZERO tmpl_ tables; it writes the caller's slot table (provisioned by the caller's brick), never a triage-owned template"
+  ]
+}
