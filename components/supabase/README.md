@@ -43,8 +43,10 @@ the `public` schema with no client values and no secrets. Every template is
 | [`templates/content-tracker.sql`](templates/content-tracker.sql) | (1) app data | `tmpl_seo_content_findings` — grounded content / on-page findings ledger for the `[content_tracker_plugin]` brick. Server-write-only; `on_conflict (tenant, finding_id, run_date)`; no public read surface. |
 | [`templates/competitor-gap.sql`](templates/competitor-gap.sql) | (1) app data | `tmpl_seo_competitor_gaps` — grounded competitor / SERP gaps ledger for the `[competitor_gap_plugin]` brick. Server-write-only; `on_conflict (tenant, finding_id, run_date)`; no public read surface. |
 | [`templates/seo-monitor.sql`](templates/seo-monitor.sql) | (3) derived history | The `[seo_monitor_plugin]` brick's isolated PAIR — `tmpl_seo_monitor_snapshots` (per-URL diff baseline) + `tmpl_seo_monitor_events` (classified change events). Append point-in-time history; server-write-only; no public read surface. |
+| [`templates/backlinks.sql`](templates/backlinks.sql) | (1) app data | `tmpl_seo_backlink_findings` — grounded referring-domain / link-gap / authority ledger for the `[backlinks_plugin]` brick. Server-write-only; `on_conflict (tenant, finding_id, run_date)`; no public read surface. |
+| [`templates/content-gen.sql`](templates/content-gen.sql) | (1) app data | `tmpl_seo_content_briefs` — DRAFT-FIRST SERP-grounded content-brief ledger for the `[content_gen_plugin]` brick. Server-write-only; `on_conflict (tenant, brief_id, run_date)`; no public read surface. |
 
-Fourteen templates create **seventeen tables** (`child-owned-via-parent`,
+Sixteen templates create **nineteen tables** (`child-owned-via-parent`,
 `seo-audit-runs` and `seo-monitor` each create two).
 
 ## Conventions baked into every template
