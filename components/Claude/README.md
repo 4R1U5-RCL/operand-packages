@@ -35,3 +35,4 @@ side, each as its own subfolder with a `SKILL.md` entry point:
 | [`ci-add-to-board/`](ci-add-to-board/) | Wire `actions/add-to-project` CI so new issues/PRs auto-add to a Projects board. |
 | [`app-security-audit/`](app-security-audit/) | App-surface security audit (RLS + response headers + SCA) of a built client repo, via the `audit` package — sits upstream of the harness `verify` stage. |
 | [`diagnose-secret/`](diagnose-secret/) | Diagnose a secret that looks right but 401s at runtime — narrows to one of the 4 PAT-11 causes; never echoes the value. |
+| [`verify-rotation/`](verify-rotation/) | Post-rotation propagation check — runs the `secret-propagation` ops-agent on-demand against a named key (IN-13 container-fingerprint guard); presence-only verdicts, never values. Companion to `diagnose-secret`. |

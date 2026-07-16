@@ -1,0 +1,36 @@
+# brick-freshness.yml — the "no drift" gate for the bricks/ assembly view.
+#
+# bricks/<brick>/components/ holds MATERIALISED copies of the components each brick
+# composes (vendoring-with-a-lockfile). This gate proves those copies are in sync
+# with the source-of-truth components/ tree: it re-runs the assembly into a temp dir
+# and fails if any brick folder differs from what its brick.json manifest + the
+# current components/ would produce. A component edited under components/ without
+# re-running `node scripts/assemble-bricks.mjs` fails here.
+#
+# Runs on push + pull_request — the repo's only other workflow (nightly-sweep) is
+# dispatch-only, so this is the standalone push/PR gate. Reads only.
+# Action tags mirror the repo convention (nightly-sweep.yml pins to major @v4).
+
+name: brick-freshness
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check brick freshness (no drift vs components/)
+        run: node scripts/check-brick-freshness.mjs

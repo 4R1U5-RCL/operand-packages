@@ -1,0 +1,15 @@
+{
+  "name": "email-lead-qualifier",
+  "plugin": "[email_plugin]",
+  "title": "Email lead receiver / qualifier",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/email-lead-qualifier",
+  "components": [
+    "Webapp/inbound-email",
+    "Webapp/transactional-email",
+    "n8n/workflows/email-report.json",
+    "n8n/workflows/signed-webhook-base.json",
+    "supabase/templates/public-capture.sql"
+  ],
+  "planned": []
+}

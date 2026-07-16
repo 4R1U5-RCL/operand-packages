@@ -6,7 +6,7 @@
 # webhook seam. There is deliberately NO `schedule:` trigger here — the schedule is
 # owned by n8n, this repo just holds the runner.
 #
-# DRY-RUN IS STRUCTURAL. The runner (Claude/ops-agents/scheduled/nightly-sweep.mjs)
+# DRY-RUN IS STRUCTURAL. The runner (components/Claude/ops-agents/scheduled/nightly-sweep.mjs)
 # spawns the agent with --dry-run and NEVER forwards --apply: merging green
 # patch/minor Dependabot PRs and applying audit fixes stay DEFERRED to the main
 # session behind an explicit --apply. The `dry_run` input below documents the
@@ -46,7 +46,7 @@ jobs:
         # write caught in-agent) · 2 no parseable report. The gate reflects agent
         # HEALTH — the sweep itself is an informational digest, not an alarm.
         # Any absent cred is an honest-skip with a note, never a crash.
-        run: node Claude/ops-agents/scheduled/nightly-sweep.mjs --dry-run
+        run: node components/Claude/ops-agents/scheduled/nightly-sweep.mjs --dry-run
         env:
           NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
           NOTIFY_TOKEN: ${{ secrets.NOTIFY_TOKEN }}

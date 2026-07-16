@@ -1,0 +1,14 @@
+{
+  "name": "sms-lead-qualifier",
+  "plugin": "[sms_plugin]",
+  "title": "SMS lead receiver / qualifier",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/sms-lead-qualifier",
+  "components": [
+    "n8n/workflows/sms-state-machine.json",
+    "n8n/workflows/signed-webhook-base.json",
+    "Webapp/n8n-trigger",
+    "supabase/templates/per-user-owned.sql"
+  ],
+  "planned": []
+}

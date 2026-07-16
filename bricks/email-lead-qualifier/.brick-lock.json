@@ -1,0 +1,11 @@
+{
+  "brick": "email-lead-qualifier",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "Webapp/inbound-email": "30d5a68f8ff3b2cdaa582d9dff18b19988b8ca7a4d431ae0973dbd3bac67577d",
+    "Webapp/transactional-email": "8c87b54627fcbff467167f412560acdd240737cdefe32756125e83c71a3294c9",
+    "n8n/workflows/email-report.json": "6619a7e4444c951ed2d13ff278bc2fd9e62f94349473798868ab1b199e124170",
+    "n8n/workflows/signed-webhook-base.json": "16dba045dcdd64a9b7c36cd4ad5963332dfd11cbe1683d2f331fe8696af15b79",
+    "supabase/templates/public-capture.sql": "7fc3c5c02c6f59a1e89d3dcc911ed71faf77ba2e5268d3afa3425ce8b6ecbeda"
+  }
+}

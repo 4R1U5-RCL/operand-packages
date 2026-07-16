@@ -1,0 +1,19 @@
+{
+  "name": "@studio/n8n-trigger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The foundational server-only n8n seam: a signed (timestamped HMAC-SHA256) trigger for a hosted n8n workflow webhook, plus the matching inbound verifier for its callbacks. One signing scheme both directions; the workflow definition stays hosted (recurring boundary). Node built-ins only, no deps.",
+  "exports": {
+    ".": "./src/client.mjs",
+    "./client": "./src/client.mjs",
+    "./verify": "./src/verify.mjs"
+  },
+  "scripts": {
+    "selftest": "node selftest.mjs"
+  },
+  "files": [
+    "src",
+    "docs"
+  ]
+}

@@ -1,8 +1,8 @@
 # supabase — schema templates
 
 Reusable Supabase **schema templates** for the studio's own provisioning — a
-top-level sibling of [`Claude/`](../Claude/), [`Webapp/`](../Webapp/) and
-[`n8n/`](../n8n/). Each template is one idempotent SQL migration realising a
+layer under `components/`, sibling to [`Claude/`](../Claude/),
+[`Webapp/`](../Webapp/) and [`n8n/`](../n8n/). Each template is one idempotent SQL migration realising a
 single [`packages/db`](https://github.com/4R1U5-RCL/studio) §8.1 data shape,
 distilled into client-agnostic DDL — the starting point and reference shape for
 schema on a new project.

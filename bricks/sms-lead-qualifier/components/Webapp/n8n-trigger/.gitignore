@@ -1,0 +1,6 @@
+# local secrets — never commit. The trigger reads creds from env or
+# ~/.claude/n8n-trigger.env, not from anything in this package.
+n8n-trigger.env
+.env
+.env.*
+*.local
