@@ -1,0 +1,13 @@
+{
+  "name": "reporting-digest",
+  "plugin": "[reporting_digest_plugin]",
+  "title": "Reporting digest — read SEO audit output → summarize → notify",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/reporting-digest",
+  "components": [
+    "n8n/workflows/reporting-digest.json",
+    "supabase/templates/seo-audit-runs.sql",
+    "supabase/templates/reporting-digest.sql"
+  ],
+  "planned": []
+}

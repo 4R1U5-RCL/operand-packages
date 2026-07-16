@@ -1,0 +1,650 @@
+{
+  "name": "[TEMPLATE] [reporting_digest_plugin] Reporting Digest — read SEO audit output → summarize → notify",
+  "nodes": [
+    {
+      "id": "every-week",
+      "name": "Every Week",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "let tenant = null;\ntry { tenant = (($vars.SEO_TENANT || 'operand')); } catch (e) { tenant = null; }\ntenant = (tenant === null || tenant === undefined || String(tenant).trim() === '') ? null : String(tenant).trim();\nconst DAY = 86400000;\nconst now = Date.now();\n// UTC day-aligned trailing 7-day window ending at the start of today.\nconst endMs = new Date(new Date(now).setUTCHours(0, 0, 0, 0)).getTime();\nconst startMs = endMs - 7 * DAY;\nconst iso = (ms) => new Date(ms).toISOString();\nreturn [{ json: {\n  __tenant: tenant,\n  __period_start: iso(startMs),\n  __period_end: iso(endMs),\n} }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-report-log",
+      "name": "Read Report Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_report_log?select=id&status=eq.sent&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&period_start=eq.{{ encodeURIComponent($json.__period_start) }}&period_end=eq.{{ encodeURIComponent($json.__period_end) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "dedup-guard",
+      "name": "Dedup Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: Object.assign({}, c, { __already_sent: rows.length > 0 }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "fresh-period",
+      "name": "Fresh Period?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fresh-period-cond",
+              "leftValue": "={{ $json.__already_sent === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stop-duplicate",
+      "name": "Stop Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    },
+    {
+      "id": "read-latest-run",
+      "name": "Read Latest Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        -80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_audit_runs?select=run_date,status,child_status,summary,target&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&order=run_date.desc&limit=1",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "capture-run",
+      "name": "Capture Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const runOk = !(status && (status < 200 || status >= 300));\n  const run = (runOk && rows.length > 0) ? rows[0] : null;\n  out.push({ json: Object.assign({}, c, {\n    __run_ok: runOk,\n    __latest_run: run,\n    __latest_run_date: run && run.run_date ? String(run.run_date) : null,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-queue",
+      "name": "Read Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1540,
+        -80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_audit_queue?select=task_id,url_or_entity,issue_classes,severity,priority_score,recommendation,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&run_date=eq.{{ encodeURIComponent($json.__latest_run_date) }}&status=eq.open&order=priority_score.desc,task_id.asc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "extract-facts",
+      "name": "Extract Facts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Capture Run').all();\nconst items = $input.all();\nconst out = [];\nconst TOP_N = 5;\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const queueOk = !(status && (status < 200 || status >= 300));\n  const run = c.__latest_run || null;\n  let factsOk = false;\n  let reason = null;\n  let topTasks = [];\n  let __total_open = 0;\n  if (!c.__run_ok || !run) { reason = 'no_audit_run'; }\n  else if (!queueOk) { reason = 'queue_error_' + (status || 'unknown'); }\n  else {\n    // Only real open queue rows contribute — no invented tasks. Ordered priority_score desc\n    // (stable by task_id) from the read. total_open counts the WHOLE bounded scan (the real\n    // backlog); top_tasks surfaces only the top-N in prose → honest \"N of M\" reporting.\n    let totalOpen = 0;\n    for (const r of rows) {\n      if (!r || r.task_id == null) continue;\n      totalOpen++;\n      if (topTasks.length < TOP_N) {\n        topTasks.push({\n          task_id: String(r.task_id),\n          url_or_entity: r.url_or_entity == null ? null : String(r.url_or_entity),\n          issue_classes: Array.isArray(r.issue_classes) ? r.issue_classes : [],\n          severity: r.severity == null ? null : String(r.severity),\n          priority_score: Number.isFinite(Number(r.priority_score)) ? Number(r.priority_score) : null,\n          recommendation: r.recommendation == null ? null : String(r.recommendation),\n        });\n      }\n    }\n    __total_open = totalOpen;\n    factsOk = totalOpen > 0;\n    if (!factsOk) reason = 'no_open_tasks';\n  }\n  // Honesty flag: the latest run may predate the reporting window (no fresh audit this period).\n  // We still report it (the freshest available) but SAY it is older — never present stale data\n  // as current. Compared as YYYY-MM-DD day strings (run_date is a date; window start is a ts).\n  const winStartDay = c.__period_start ? String(c.__period_start).slice(0, 10) : null;\n  const runDay = (run && run.run_date != null) ? String(run.run_date).slice(0, 10) : null;\n  const staleRun = !!(runDay && winStartDay && runDay < winStartDay);\n  const sourceFacts = {\n    run: run ? {\n      run_date: run.run_date != null ? String(run.run_date) : null,\n      status: run.status != null ? String(run.status) : null,\n      child_status: (run.child_status && typeof run.child_status === 'object') ? run.child_status : {},\n      summary: run.summary != null ? String(run.summary) : null,\n    } : null,\n    top_tasks: topTasks,\n    task_count: topTasks.length,\n    total_open: __total_open,\n    stale_run: staleRun,\n    window: { start: c.__period_start, end: c.__period_end },\n  };\n  out.push({ json: Object.assign({}, c, {\n    __facts_ok: factsOk,\n    __facts_reason: reason,\n    __source_facts: sourceFacts,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "summary",
+      "name": "Summary?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "summary-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($env.REPORTING_DIGEST_SUMMARY_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "summarize",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        -160
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.REPORTING_DIGEST_SUMMARY_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach-summary",
+      "name": "Attach Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Extract Facts').all().filter((it) => it.json && it.json.__facts_ok === true);\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  let summary = null;\n  const cand = (p && typeof p === 'object') ? (p.summary || p.executive_summary || p.reply_draft || p.rationale) : null;\n  if (typeof cand === 'string' && cand.trim()) summary = cand.trim().slice(0, 1200);\n  out.push({ json: Object.assign({}, c, { __summary: summary }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-summary",
+      "name": "Skip Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: Object.assign({}, it.json, { __summary: null }) }));"
+      }
+    },
+    {
+      "id": "compose-report",
+      "name": "Compose Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const facts = j.__source_facts || {};\n  const win = facts.window || {};\n  const day = (iso) => (iso ? String(iso).slice(0, 10) : '?');\n  const header = 'SEO report — ' + day(win.start) + ' to ' + day(win.end);\n  let body;\n  let status;\n  if (j.__facts_ok === true) {\n    status = 'sent';\n    const run = facts.run || {};\n    const cs = (run.child_status && typeof run.child_status === 'object') ? run.child_status : {};\n    const csLine = Object.keys(cs).map((k) => k + ':' + cs[k]).join(', ');\n    const totalOpen = (facts.total_open != null) ? facts.total_open : facts.task_count;\n    const shown = Array.isArray(facts.top_tasks) ? facts.top_tasks.length : 0;\n    // Honest \"showing N of M\" so top-N never understates the real backlog.\n    const stale = facts.stale_run ? ' (no NEW audit this period — showing the most recent, from ' + day(run.run_date) + ')' : '';\n    const headline = 'Latest audit (' + day(run.run_date) + '): ' + (run.status || 'unknown') +\n      ' — ' + totalOpen + ' prioritized action(s) open' + stale + '.';\n    const health = 'Health snapshot — ' + (csLine || 'no child status recorded') + '.';\n    const tasks = (Array.isArray(facts.top_tasks) ? facts.top_tasks : []).map((t, i) => {\n      const cls = (t.issue_classes || []).join('+');\n      const rec = t.recommendation ? (' — ' + String(t.recommendation).slice(0, 160)) : '';\n      return (i + 1) + '. [' + (t.priority_score == null ? '?' : t.priority_score) + '] ' +\n        (t.url_or_entity || '?') + ' (' + cls + ', ' + (t.severity || 'info') + ')' + rec;\n    });\n    const topsHeader = 'Top prioritized actions (' + shown + ' of ' + totalOpen + '):';\n    body = [header, '', headline, health, '', topsHeader, ...tasks].join('\\n');\n  } else {\n    // HONEST FAILURE: nothing usable from the orchestrator — say so, invent nothing.\n    status = (j.__facts_reason && String(j.__facts_reason).indexOf('error') !== -1) ? 'error' : 'no_data';\n    const why = j.__facts_reason ? (' (' + j.__facts_reason + ')') : '';\n    body = header + '\\n\\nNo SEO audit results are available to report for this period' + why +\n      '. No figures or actions are shown because none were returned from the audit tables.';\n  }\n  const summary = j.__summary ? (j.__summary + '\\n\\n') : '';\n  const report = summary + body;\n  out.push({ json: Object.assign({}, j, { __report: report, __status: status }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const facts = j.__source_facts || {};\n  const payload = {\n    message: '🧾 ' + String(j.__report || '').slice(0, 3500),\n    kind: 'seo_reporting_digest',\n    tenant: j.__tenant || null,\n    status: j.__status || null,\n    period_start: j.__period_start || null,\n    period_end: j.__period_end || null,\n    task_count: (facts.total_open != null ? facts.total_open : (facts.task_count || 0)),\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3080,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "stamp-run",
+      "name": "Stamp Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compose Report').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const delivered = status >= 200 && status < 300;\n  // A no_data / error report still records its run; sent_at is set only when the report was\n  // actually delivered AND had data to report.\n  const sentAt = (delivered && c.__status === 'sent') ? new Date().toISOString() : null;\n  out.push({ json: Object.assign({}, c, { __sent_at: sentAt }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "record-report",
+      "name": "Record Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3520,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_report_log?on_conflict=tenant,period_start,period_end",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tenant: $json.__tenant, period_start: $json.__period_start, period_end: $json.__period_end, sent_at: $json.__sent_at, status: $json.__status, report_summary: $json.__report, source_facts: $json.__source_facts }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Week": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Read Report Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Report Log": {
+      "main": [
+        [
+          {
+            "node": "Dedup Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup Guard": {
+      "main": [
+        [
+          {
+            "node": "Fresh Period?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fresh Period?": {
+      "main": [
+        [
+          {
+            "node": "Read Latest Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Latest Run": {
+      "main": [
+        [
+          {
+            "node": "Capture Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Run": {
+      "main": [
+        [
+          {
+            "node": "Read Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Queue": {
+      "main": [
+        [
+          {
+            "node": "Extract Facts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Facts": {
+      "main": [
+        [
+          {
+            "node": "Summary?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary?": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Attach Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Summary": {
+      "main": [
+        [
+          {
+            "node": "Compose Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Summary": {
+      "main": [
+        [
+          {
+            "node": "Compose Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Report": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Report": {
+      "main": [
+        [
+          {
+            "node": "Stamp Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp Run": {
+      "main": [
+        [
+          {
+            "node": "Record Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}
