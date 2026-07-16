@@ -21,3 +21,18 @@ write-back; never in the critical path. The add-on brick — proof the seams are
 | `n8n/workflows/outbound-verdict-callback.json` | write-back with cost + latency — enrichment lands on the lead row (push → verdict → map → re-enter). |
 | `Webapp/spend-gate` | Daily cost cap: `get_daily_token_spend()` RPC + pricing-truth module; over the cap the model is skipped. *(SHARED with community-lead-radar, seo-improver.)* |
 | `supabase/templates/derived-history.sql` | Enrichment write-back appended alongside the rule band — append-only derived-history shape. |
+
+## New capabilities (additive, non-breaking)
+
+Two builder params generalize this add-on without touching any existing caller
+(both default to today's behaviour). See `planned[]` in [`brick.json`](brick.json):
+
+- **`return_partial` mode** (defaults to `write_back`). In `return_partial` the
+  builder skips the two Supabase hops and the persistence gates, keeping only the
+  pure scoring spine, and returns the clamped partial for the **caller** to merge
+  over nulls. This makes Readout a superset that subsumes Radar's private
+  enrichment twin — same engine, stateless call shape.
+- **`scoringProfile`** (defaults to `intake`). A self-contained
+  `{validate, instruction, clamp}` triple: `intake` is today's SMS/email schema
+  verbatim; `lead_triage` is the lead-gen scoring lifted from Radar's twin. The
+  profile is orthogonal to the mode (any mode × any profile).

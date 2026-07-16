@@ -1,0 +1,21 @@
+{
+  "name": "content-wall",
+  "plugin": "[content_wall_plugin]",
+  "title": "Content Wall — Collect → Moderate → Publish",
+  "kind": "BASE",
+  "status": "built",
+  "portfolio": "https://operandstudio.com/portfolio/content-wall",
+  "spec": "SPEC_operand-content-wall_2026-07-16.md",
+  "components": [
+    "n8n/workflows/signed-webhook-base.json",
+    "n8n/workflows/llm-doc-pipeline-mono.json",
+    "n8n/workflows/notification-fanout.json",
+    "Webapp/spend-gate",
+    "supabase/templates/security-barrier-view.sql"
+  ],
+  "planned": [
+    "content-wall-plugin workflow builder — the content-TYPE-parameterized (testimonial | review | qa | showcase) collect → moderate → publish machine that generalizes testimonial-plugin (Vouch); a PRIVATE intake builder + a fail-open moderation child; not yet snapshotted here (mapped to the signed-webhook-base intake shape + the llm-doc-pipeline-mono moderation shape)",
+    "tmpl_content_wall SQL — the brick-exclusive multi-tenant, multi-type submission table (content_type bound SERVER-SIDE by the [public_form_gateway] relay, never trusted from the browser); the security-barrier-view snapshot shows the publish shape, the concrete typed table is not yet authored here",
+    "tmpl_content_wall_moderation_log SQL — the brick-exclusive approval/moderation audit table; not yet authored here"
+  ]
+}

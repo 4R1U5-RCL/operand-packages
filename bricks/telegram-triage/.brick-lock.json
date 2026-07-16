@@ -1,0 +1,9 @@
+{
+  "brick": "telegram-triage",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/signed-webhook-base.json": "16dba045dcdd64a9b7c36cd4ad5963332dfd11cbe1683d2f331fe8696af15b79",
+    "n8n/workflows/outbound-verdict-callback.json": "9666eeb6b5c500a80b711ffb12a3a8238dcdd6e724b5bdaa909d99a610e43fef",
+    "n8n/workflows/notification-fanout.json": "c8f694a60fa7fac0985049b1b6763bdca45714e044c77b99ee6b39865ca360f2"
+  }
+}

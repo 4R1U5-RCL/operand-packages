@@ -1,0 +1,10 @@
+{
+  "brick": "scheduled-digest",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/schedule-dispatcher.json": "85d62dac67c1728aac65962ac3ad433915583a014b5ff8e6b203eb7a4b4de1d3",
+    "n8n/workflows/notification-fanout.json": "c8f694a60fa7fac0985049b1b6763bdca45714e044c77b99ee6b39865ca360f2",
+    "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
+    "supabase/templates/idempotent-run-log.sql": "da948d66e7bb0f98c141a4fd015ab94102caf20245f523ddbafe0146eaf0f2d5"
+  }
+}

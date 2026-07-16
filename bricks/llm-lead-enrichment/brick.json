@@ -11,5 +11,8 @@
     "Webapp/spend-gate",
     "supabase/templates/derived-history.sql"
   ],
-  "planned": []
+  "planned": [
+    "return_partial mode (additive, defaults to write_back) — a stateless enrichment mode that SKIPS the two Supabase hops (Fetch Lead Row + Write Enrichment) and the persistence gates, leaving only the pure scoring spine, and RETURNS the clamped partial for the CALLER to merge over nulls. Non-breaking: every existing SMS/email caller is byte-for-byte unchanged. Makes Readout a superset that subsumes Radar's private enrichment twin (convergence W-1); a builder param, not a snapshotted artifact",
+    "scoringProfile param (defaults to 'intake') — a self-contained {validate, instruction, clamp} triple parameterizing the scoring; 'intake' = today's SMS/email schema VERBATIM, 'lead_triage' = the lead-gen scoring lifted from Radar's twin. Orthogonal to mode (any mode x any profile), extensible to review_sentiment etc.; a builder param, not a snapshotted artifact"
+  ]
 }

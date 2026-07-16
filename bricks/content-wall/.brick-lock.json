@@ -1,0 +1,11 @@
+{
+  "brick": "content-wall",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/signed-webhook-base.json": "16dba045dcdd64a9b7c36cd4ad5963332dfd11cbe1683d2f331fe8696af15b79",
+    "n8n/workflows/llm-doc-pipeline-mono.json": "f4264450b18aa5089155c74687ea52162567f5d922f990158b94175ab2630607",
+    "n8n/workflows/notification-fanout.json": "c8f694a60fa7fac0985049b1b6763bdca45714e044c77b99ee6b39865ca360f2",
+    "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
+    "supabase/templates/security-barrier-view.sql": "f6b1d739faf28f0ab178b9c7bb36e3831564ae219f62ba32cbca215f0c3f87c4"
+  }
+}

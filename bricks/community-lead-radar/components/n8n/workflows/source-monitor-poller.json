@@ -1,0 +1,348 @@
+{
+  "name": "[TEMPLATE] Source Monitor — Durable-Cursor Poller",
+  "nodes": [
+    {
+      "id": "poll",
+      "name": "Poll",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitor_config?select=*&enabled=eq.true",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "The engine reads ONLY the source/adapter rows (config-driven adapters, not per-source subgraphs). PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "read-cursors",
+      "name": "Read Cursors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitor_cursor?select=*",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "Durable per-source bookmark (the cursor table). PAT-4 guard on the body."
+    },
+    {
+      "id": "fetch-source",
+      "name": "Fetch Source",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.source_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "alwaysOutputData": true,
+      "notes": "Per-adapter official-API fetch with rate discipline. The URL / method / auth-mint are supplied by the config-driven SourceAdapter descriptor, NOT hardcoded here. PAT-4 guard on the body (empty 200 possible)."
+    },
+    {
+      "id": "normalize",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\n// Map each source payload to the CANONICAL item contract the engine emits:\n//   { source, external_id, url, title, body, author, posted_at, content_hash }\n// The per-adapter extract fn body is config-driven data (SourceAdapter.extract),\n// not a hardcoded per-source block. content_hash is stable + edit-tracking.\nconst out = [];\nfor (const it of $input.all()) {\n  const res = it.json;\n  const t = (res.body ?? '').toString();\n  let payload;\n  try { payload = t.trim() ? JSON.parse(t) : []; } catch (e) { payload = []; }\n  const rows = Array.isArray(payload) ? payload : (payload.items || payload.data || []);\n  for (const r of rows) {\n    const body = String(r.body ?? r.text ?? '');\n    const content_hash = crypto.createHash('sha256').update(body).digest('hex');\n    out.push({ json: {\n      source: String(r.source ?? it.json.source ?? ''),\n      external_id: String(r.id ?? r.external_id ?? ''),\n      url: String(r.url ?? ''),\n      title: String(r.title ?? ''),\n      body,\n      author: String(r.author ?? ''),\n      posted_at: r.posted_at ?? r.created_at ?? null,\n      content_hash,\n    } });\n  }\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "check-seen",
+      "name": "Check Seen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitor_seen?select=external_id,content_hash&source=eq.{{ $json.source }}&external_id=eq.{{ $json.external_id }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "Dedup against the seen table. A row is NEW (no seen row) or CONTENT-EDITED (content_hash differs). PAT-4 guard on the body."
+    },
+    {
+      "id": "dedupe-gate",
+      "name": "Dedupe Gate",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "filterType": "manual",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dedupe-cond",
+              "leftValue": "={{ $json.__is_new_or_edited === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "notes": "Only NEW or CONTENT-EDITED items pass. 0 items is a valid, silent run."
+    },
+    {
+      "id": "upsert-seen",
+      "name": "Upsert Seen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitor_seen?on_conflict=source,external_id",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, external_id: $json.external_id, content_hash: $json.content_hash, seen_at: new Date().toISOString() }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "Record the item as seen (idempotent upsert on source,external_id). PAT-4 guard on the body."
+    },
+    {
+      "id": "advance-cursor",
+      "name": "Advance Cursor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/monitor_cursor?on_conflict=source",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, cursor_value: $json.posted_at || new Date().toISOString(), updated_at: new Date().toISOString() }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "Advance the durable cursor per source to the max seen this run — regardless of how many items the downstream brick keeps or dropped (prevents gaps / re-fetch). Nothing past here is engine — the consuming brick (qualify / notify) reads the canonical item stream. PAT-4 guard on the body."
+    }
+  ],
+  "connections": {
+    "Poll": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Read Cursors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Cursors": {
+      "main": [
+        [
+          {
+            "node": "Fetch Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Source": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Check Seen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Seen": {
+      "main": [
+        [
+          {
+            "node": "Dedupe Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedupe Gate": {
+      "main": [
+        [
+          {
+            "node": "Upsert Seen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Seen": {
+      "main": [
+        [
+          {
+            "node": "Advance Cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
