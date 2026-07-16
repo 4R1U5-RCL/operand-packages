@@ -1,0 +1,731 @@
+{
+  "name": "[TEMPLATE] [content_gen_plugin] Content Generation — DataForSEO SERP → grounded brief → notify",
+  "nodes": [
+    {
+      "id": "brief-webhook",
+      "name": "Brief Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-gen",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "verify-hmac",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst MAX_SKEW_MS = 300000;\nconst SIG_HEADER = \"x-n8n-signature\";\nconst TS_HEADER = \"x-n8n-timestamp\";\nconst STATIC_HEADER = \"x-static-token\";\nconst hmac = (d) => crypto.createHmac('sha256', SECRET).update(d).digest('hex');\nconst safeEq = (aHex, bHex) => {\n  if (!aHex || !bHex) return false;\n  const a = Buffer.from(String(aHex)), b = Buffer.from(String(bHex));\n  return a.length === b.length && crypto.timingSafeEqual(a, b);\n};\n// TE-16: recover the EXACT signed bytes — rawBody when n8n captured it, else a\n// careful re-stringify of the parsed body (must round-trip byte-identical).\nconst rawOf = (j) => (j.rawBody != null) ? j.rawBody.toString() : JSON.stringify(j.body);\n\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const headers = j.headers || {};\n  const raw = rawOf(j);\n  let ok = false;\n  // Fail-closed: an unconfigured secret can never verify (and never throws).\n  if (SECRET) {\n  const sig = headers[SIG_HEADER];\n  const ts = headers[TS_HEADER];\n  if (ts) {\n    // timestamp PRESENT -> studio form: replay-guarded HMAC(`${ts}.${body}`).\n    const n = Number(ts);\n    if (sig && Number.isFinite(n) && Math.abs(Date.now() - n) <= MAX_SKEW_MS) {\n      ok = safeEq(hmac(ts + '.' + raw), sig);\n    }\n  } else {\n    // timestamp ABSENT -> harness verify-n8n form: bare-body HMAC(`${body}`),\n    // only the signature header present.\n    ok = safeEq(hmac(raw), sig);\n  }\n  }\n  // n8n Cloud freezes Code-node input items (IN-25): in-place mutations are\n  // silently dropped — always RETURN new items.\n  const item = { json: Object.assign({}, j, { __authok: ok }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "auth-gate",
+      "name": "Auth Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "auth-gate-cond",
+              "leftValue": "={{ $json.__authok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "reject-401",
+      "name": "Reject 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"invalid or missing signature\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "sign-ack",
+      "name": "Sign Ack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const requestId = (j.body && j.body.request_id) || j.request_id || null;\n  const body = { ok: true, request_id: requestId };\n  const payload = JSON.stringify(body);\n  // n8n Cloud freezes Code-node input items (IN-25): in-place writes are silently\n  // dropped, so the respond node would read an item WITHOUT __sig and answer\n  // unsigned. Always RETURN a NEW item carrying the signing fields (and binary).\n  // Fail-open to UNSIGNED when the secret is unreachable — empty __sig rather than\n  // throw or sign with an empty key.\n  const item = { json: Object.assign({}, j, {\n    __body: body,\n    __ts: String(Date.now()),\n    __sig: SECRET ? crypto.createHmac('sha256', SECRET).update(payload).digest('hex') : '',\n  }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "ack-202-signed",
+      "name": "Ack 202 Signed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        -40
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.__body }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "x-n8n-signature",
+                "value": "={{ $json.__sig }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nconst items = $input.all();\nconst src = (items[0] && items[0].json) || {};\nconst body = (src.body && typeof src.body === 'object') ? src.body : src;\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\n// Target keyword: $vars slot, optionally overridden by the on-demand webhook body.\nlet keyword = safe(() => ($vars.SEO_BRIEF_TARGET_KEYWORD));\nif (body && body.target_keyword) { const bk = safe(() => body.target_keyword); if (bk) keyword = bk; }\n// Optional cluster label: $vars slot, else pulled from a keyword-research row supplied in the body.\nlet cluster = safe(() => ($vars.SEO_BRIEF_CLUSTER_LABEL));\nif (body && body.cluster_label) { const bc = safe(() => body.cluster_label); if (bc) cluster = bc; }\nif (!cluster && body && body.keyword_row && typeof body.keyword_row === 'object') { const bc = safe(() => body.keyword_row.cluster_label); if (bc) cluster = bc; }\nconst location = safe(() => (($vars.SEO_LOCATION_NAME || 'United States'))) || 'United States';\nconst language = safe(() => (($vars.SEO_LANGUAGE_NAME || 'English'))) || 'English';\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nconst runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\nconst hasKeyword = !!keyword;\nreturn [{ json: Object.assign({}, src, {\n  __tenant: tenant,\n  __keyword: keyword,\n  __cluster: cluster,\n  __location: location,\n  __language: language,\n  __run_date: day(runMs),\n  __facts_ok: hasKeyword ? null : false,\n  __facts_reason: hasKeyword ? null : 'no_keyword',\n}) }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "spend-read",
+      "name": "Spend Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/global_send_quotas?select=spend_usd,count&channel=eq.dataforseo&sender_id=eq.dataforseo-daily&window_start=eq.{{ encodeURIComponent(new Date().toISOString().slice(0,10)) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "spend-gate",
+      "name": "Spend Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"SEO_DATAFORSEO_DAILY_CAP\"));\nconst ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const row = rows[0] || {};\n  const spent = Number(row.spend_usd != null ? row.spend_usd : (row.count != null ? row.count : 0)) || 0;\n  // No cap configured → do not block (fail-open); a finite cap gates at the boundary.\n  const under = !Number.isFinite(CAP) || CAP <= 0 ? true : spent < CAP;\n  out.push({ json: Object.assign({}, c, { __spend_under_cap: under }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "pull",
+      "name": "Pull?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pull-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true && $json.__facts_ok !== false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "skip-pull",
+      "name": "Skip Pull",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        180
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const reason = j.__facts_reason || 'dataforseo_spend_cap';\n  return { json: Object.assign({}, j, { __facts_ok: false, __facts_reason: reason, __grounding: null }) };\n});"
+      }
+    },
+    {
+      "id": "serp",
+      "name": "SERP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/serp/google/organic/live/advanced",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ keyword: $json.__keyword, location_name: $json.__location, language_name: $json.__language, depth: 20 }]) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBasicAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "cred-ref:dataforseo",
+          "name": "[OPERAND] DataForSEO Basic"
+        }
+      }
+    },
+    {
+      "id": "extract-serp",
+      "name": "Extract SERP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const STOP = { the:1,a:1,an:1,and:1,or:1,for:1,to:1,of:1,in:1,on:1,with:1,your:1,you:1,is:1,are:1,how:1,what:1,best:1,top:1,vs:1,'&':1,'-':1,'|':1 };\nfunction terms(s) { return String(s || '').toLowerCase().match(/[a-z0-9][a-z0-9'+-]{2,}/g) || []; }\nconst ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  // A prior honest skip (no keyword / over cap) short-circuits — never a fabricated SERP.\n  if (c.__facts_ok === false) { out.push({ json: Object.assign({}, c, { __grounding: null }) }); continue; }\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let factsOk = false;\n  let reason = null;\n  let grounding = null;\n  if (status === 401 || status === 403) { reason = 'dataforseo_unauthorized'; }\n  else if (status < 200 || status >= 300) { reason = 'dataforseo_error_' + (status || 'unknown'); }\n  else if (!parsed || !Array.isArray(parsed.tasks)) { reason = 'dataforseo_unparseable'; }\n  else {\n    const task = parsed.tasks[0] || {};\n    const taskStatus = Number(task.status_code || 0);\n    const result = Array.isArray(task.result) ? task.result[0] : null;\n    const list = result && Array.isArray(result.items) ? result.items : null;\n    if (taskStatus && taskStatus !== 20000) { reason = 'dataforseo_task_' + taskStatus; }\n    else if (!list) { reason = 'dataforseo_empty'; }\n    else {\n      const organic = [];\n      const featureSet = {};\n      const termFreq = {};\n      for (const it of list) {\n        if (!it || typeof it !== 'object') continue;\n        const type = it.type != null ? String(it.type) : 'unknown';\n        featureSet[type] = (featureSet[type] || 0) + 1;\n        if (type === 'organic') {\n          const title = it.title != null ? String(it.title) : null;\n          const url = it.url != null ? String(it.url) : null;\n          const desc = it.description != null ? String(it.description) : (it.snippet != null ? String(it.snippet) : null);\n          const rank = Number.isFinite(Number(it.rank_absolute)) ? Number(it.rank_absolute) : null;\n          if (title || url) organic.push({ title: title, url: url, description: desc, rank: rank });\n          // Mine candidate entities/terms from ranking titles + snippets (grounding, not invention).\n          for (const w of terms(title).concat(terms(desc))) { if (!STOP[w]) termFreq[w] = (termFreq[w] || 0) + 1; }\n        }\n      }\n      if (!organic.length) { reason = 'dataforseo_no_organic'; }\n      else {\n        organic.sort((a, b) => (a.rank == null ? 999 : a.rank) - (b.rank == null ? 999 : b.rank));\n        // Entities = the terms that recur across ≥2 ranking results (a coverage signal).\n        const entities = Object.keys(termFreq).filter((w) => termFreq[w] >= 2).sort((a, b) => termFreq[b] - termFreq[a]).slice(0, 30);\n        const features = Object.keys(featureSet).sort((a, b) => featureSet[b] - featureSet[a]);\n        // Coarse intent from the SERP features + title language (grounded heuristic, LLM refines).\n        let intent = 'informational';\n        const kw = String(c.__keyword || '').toLowerCase();\n        if (/\\b(buy|price|pricing|cost|cheap|deal|discount|coupon)\\b/.test(kw) || features.indexOf('shopping') !== -1) intent = 'transactional';\n        else if (/\\b(best|top|review|vs|compare|alternative)\\b/.test(kw)) intent = 'commercial';\n        else if (features.indexOf('local_pack') !== -1) intent = 'navigational';\n        grounding = {\n          target_keyword: c.__keyword,\n          location: c.__location,\n          language: c.__language,\n          top_organic: organic.slice(0, 10),\n          serp_features: features,\n          entities: entities,\n          intent: intent,\n          organic_count: organic.length,\n        };\n        factsOk = true;\n      }\n    }\n  }\n  out.push({ json: Object.assign({}, c, {\n    __facts_ok: factsOk,\n    __facts_reason: reason,\n    __grounding: grounding,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "assign-id",
+      "name": "Assign ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nfunction hex(n) { return ('00000000' + (n >>> 0).toString(16)).slice(-8); }\nreturn $input.all().map((it) => {\n  const j = it.json || {};\n  const key = String(j.__tenant || '') + '|' + String(j.__cluster || '') + '|' + String(j.__keyword || '');\n  return { json: Object.assign({}, j, { __brief_id: 'BRIEF-' + hex(hash(key)) }) };\n});"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "generate",
+      "name": "Generate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "generate-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_CONTENT_GEN_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "generate-brief",
+      "name": "Generate Brief",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2860,
+        -120
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_CONTENT_GEN_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "assemble-brief",
+      "name": "Assemble Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const DEFAULT_WORDS = 1200;\nfunction str(v, n) { return (typeof v === 'string' && v.trim()) ? v.trim().slice(0, n) : null; }\nfunction strList(v, n, max) { if (!Array.isArray(v)) return []; const out = []; for (const x of v) { const s = str(x, n); if (s) out.push(s); if (out.length >= max) break; } return out; }\nconst ctx = $('Assign ID').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const b = (p && typeof p === 'object' && p.brief && typeof p.brief === 'object') ? p.brief : p;\n  const g = (c.__grounding && typeof c.__grounding === 'object') ? c.__grounding : {};\n  // The outline may arrive as [{h2, h3:[…]}] or a flat string list — normalise to a bounded shape.\n  let outline = [];\n  if (Array.isArray(b && b.outline)) {\n    for (const sec of b.outline) {\n      if (sec && typeof sec === 'object') {\n        const h2 = str(sec.h2 || sec.heading || sec.title, 200);\n        if (h2) outline.push({ h2: h2, h3: strList(sec.h3 || sec.subheadings, 200, 8) });\n      } else { const h2 = str(sec, 200); if (h2) outline.push({ h2: h2, h3: [] }); }\n      if (outline.length >= 20) break;\n    }\n  }\n  const title = str(b && b.recommended_title, 200);\n  const meta = str(b && b.recommended_meta, 320);\n  const entities = strList(b && b.entities, 80, 40);\n  const internalLinks = strList(b && b.internal_links, 200, 20);\n  const wc = Number(b && b.word_count_target);\n  const wordCount = Number.isFinite(wc) && wc > 0 ? Math.min(Math.round(wc), 20000) : DEFAULT_WORDS;\n  const intentRaw = str(b && b.target_intent, 40);\n  const INTENTS = { informational: 1, commercial: 1, navigational: 1, transactional: 1 };\n  const intent = (intentRaw && INTENTS[intentRaw.toLowerCase()]) ? intentRaw.toLowerCase() : (g.intent || null);\n  // A brief is USABLE only when the model returned real structure; otherwise fall back to honest\n  // placeholder (the seam is bound but returned nothing usable — fail-open, never fabricated).\n  const usable = !!(title || outline.length);\n  if (usable) {\n    out.push({ json: Object.assign({}, c, {\n      __brief: {\n        recommended_title: title,\n        recommended_meta: meta,\n        outline: outline,\n        entities: entities.length ? entities : (Array.isArray(g.entities) ? g.entities : []),\n        target_intent: intent,\n        word_count_target: wordCount,\n        internal_links: internalLinks,\n        status: 'draft',\n        note: null,\n      },\n    }) });\n  } else {\n    out.push({ json: Object.assign({}, c, {\n      __brief: {\n        recommended_title: null, recommended_meta: null, outline: [],\n        entities: Array.isArray(g.entities) ? g.entities : [], target_intent: g.intent || null,\n        word_count_target: DEFAULT_WORDS, internal_links: [], status: 'draft',\n        note: 'brief pending (generation model returned no usable draft)',\n      },\n    }) });\n  }\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "placeholder-brief",
+      "name": "Placeholder Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const DEFAULT_WORDS = 1200;\nreturn $input.all().map((it) => {\n  const j = it.json || {};\n  const g = (j.__grounding && typeof j.__grounding === 'object') ? j.__grounding : {};\n  const note = j.__facts_ok === true\n    ? 'brief pending (no generation model bound) — SERP grounding captured, awaiting a bound generation child'\n    : ('brief pending — could not ground: ' + (j.__facts_reason || 'no_data'));\n  return { json: Object.assign({}, j, {\n    __brief: {\n      recommended_title: null, recommended_meta: null, outline: [],\n      entities: Array.isArray(g.entities) ? g.entities : [], target_intent: g.intent || null,\n      word_count_target: DEFAULT_WORDS, internal_links: [], status: 'draft', note: note,\n    },\n  }) };\n});"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-brief",
+      "name": "Write Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3300,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_content_briefs?on_conflict=tenant,brief_id,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ tenant: $json.__tenant, target_keyword: $json.__keyword, cluster_label: $json.__cluster, brief_id: $json.__brief_id, recommended_title: ($json.__brief || {}).recommended_title, recommended_meta: ($json.__brief || {}).recommended_meta, outline: ($json.__brief || {}).outline, entities: ($json.__brief || {}).entities, target_intent: ($json.__brief || {}).target_intent, word_count_target: ($json.__brief || {}).word_count_target, internal_links: ($json.__brief || {}).internal_links, grounding: ($json.__grounding || {}), status: (($json.__brief || {}).status || \"draft\"), run_date: $json.__run_date }]) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const brief = (j.__brief && typeof j.__brief === 'object') ? j.__brief : {};\n  const factsOk = j.__facts_ok === true;\n  const drafted = !!(brief.recommended_title || (Array.isArray(brief.outline) && brief.outline.length));\n  let message;\n  if (!factsOk) {\n    const why = j.__facts_reason ? (' (' + j.__facts_reason + ')') : '';\n    message = '📝 Content brief — could not ground a brief for \"' + (j.__keyword || '?') + '\" this run' + why +\n      '. No brief drafted because the SERP data was not returned.';\n  } else if (drafted) {\n    const sections = Array.isArray(brief.outline) ? brief.outline.length : 0;\n    message = '📝 Content brief READY FOR REVIEW — \"' + (j.__keyword || '?') + '\"' +\n      (brief.recommended_title ? ' · title: ' + String(brief.recommended_title).slice(0, 120) : '') +\n      ' · ' + sections + ' section(s), target ' + (brief.word_count_target || '?') + ' words' +\n      (brief.target_intent ? ' · intent ' + brief.target_intent : '') +\n      '. DRAFT — review before publishing.';\n  } else {\n    message = '📝 Content brief — SERP grounded for \"' + (j.__keyword || '?') +\n      '\" but ' + String(brief.note || 'no generation model bound') + '. Bind a generation child to draft the brief.';\n  }\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'content_brief',\n    tenant: j.__tenant || null,\n    target_keyword: j.__keyword || null,\n    brief_id: j.__brief_id || null,\n    run_date: j.__run_date || null,\n    facts_ok: factsOk,\n    drafted: drafted,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3740,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Brief Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC": {
+      "main": [
+        [
+          {
+            "node": "Auth Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Gate": {
+      "main": [
+        [
+          {
+            "node": "Sign Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Ack": {
+      "main": [
+        [
+          {
+            "node": "Ack 202 Signed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack 202 Signed": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Spend Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Read": {
+      "main": [
+        [
+          {
+            "node": "Spend Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Gate": {
+      "main": [
+        [
+          {
+            "node": "Pull?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull?": {
+      "main": [
+        [
+          {
+            "node": "SERP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Pull",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SERP": {
+      "main": [
+        [
+          {
+            "node": "Extract SERP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract SERP": {
+      "main": [
+        [
+          {
+            "node": "Assign ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Pull": {
+      "main": [
+        [
+          {
+            "node": "Assign ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign ID": {
+      "main": [
+        [
+          {
+            "node": "Generate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate?": {
+      "main": [
+        [
+          {
+            "node": "Generate Brief",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Placeholder Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Brief": {
+      "main": [
+        [
+          {
+            "node": "Assemble Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Brief": {
+      "main": [
+        [
+          {
+            "node": "Write Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Placeholder Brief": {
+      "main": [
+        [
+          {
+            "node": "Write Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Brief": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

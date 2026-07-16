@@ -133,7 +133,7 @@
       ],
       "parameters": {
         "language": "javaScript",
-        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nfunction toList(s) { return String(s || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean); }\nconst ALL = ['keyword_research', 'technical_audit', 'rank_tracker'];\nconst items = $input.all();\nconst src = (items[0] && items[0].json) || {};\nconst body = (src.body && typeof src.body === 'object') ? src.body : src;\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\nlet target = safe(() => ($vars.SEO_TARGET_DOMAIN));\nif (body && body.target) { const bt = safe(() => body.target); if (bt) target = bt; }\n// Which children to include: $vars CSV, optionally overridden by the on-demand body.\nlet include = toList(safe(() => (($vars.SEO_AUDIT_INCLUDE || 'keyword_research,technical_audit,rank_tracker'))));\nif (body && body.include) { const b = Array.isArray(body.include) ? body.include.join(',') : body.include; const bl = toList(b); if (bl.length) include = bl; }\nif (!include.length) include = ALL.slice();\n// Only keep recognised child keys (ignore junk from the body).\ninclude = include.filter((k) => ALL.indexOf(k) !== -1);\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nconst runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\n// Seed child_status: everything not included is 'excluded' up front (honest baseline).\nconst childStatus = {};\nfor (const k of ALL) childStatus[k] = include.indexOf(k) !== -1 ? 'pending' : 'excluded';\nreturn [{ json: Object.assign({}, src, {\n  __tenant: tenant,\n  __target: target,\n  __run_date: day(runMs),\n  __include: include,\n  __child_status: childStatus,\n}) }];"
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nfunction toList(s) { return String(s || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean); }\nconst ALL = ['keyword_research', 'technical_audit', 'rank_tracker', 'content_tracker', 'competitor_gap', 'seo_monitor', 'backlinks', 'gsc_csv', 'content_gen'];\nconst items = $input.all();\nconst src = (items[0] && items[0].json) || {};\nconst body = (src.body && typeof src.body === 'object') ? src.body : src;\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\nlet target = safe(() => ($vars.SEO_TARGET_DOMAIN));\nif (body && body.target) { const bt = safe(() => body.target); if (bt) target = bt; }\n// Which children to include: $vars CSV, optionally overridden by the on-demand body.\nlet include = toList(safe(() => (($vars.SEO_AUDIT_INCLUDE || 'keyword_research,technical_audit,rank_tracker,content_tracker,competitor_gap,seo_monitor,backlinks,gsc_csv,content_gen'))));\nif (body && body.include) { const b = Array.isArray(body.include) ? body.include.join(',') : body.include; const bl = toList(b); if (bl.length) include = bl; }\nif (!include.length) include = ALL.slice();\n// Only keep recognised child keys (ignore junk from the body).\ninclude = include.filter((k) => ALL.indexOf(k) !== -1);\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nconst runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\n// Seed child_status: everything not included is 'excluded' up front (honest baseline).\nconst childStatus = {};\nfor (const k of ALL) childStatus[k] = include.indexOf(k) !== -1 ? 'pending' : 'excluded';\nreturn [{ json: Object.assign({}, src, {\n  __tenant: tenant,\n  __target: target,\n  __run_date: day(runMs),\n  __include: include,\n  __child_status: childStatus,\n}) }];"
       },
       "alwaysOutputData": true
     },
@@ -198,12 +198,132 @@
       "onError": "continueRegularOutput"
     },
     {
+      "id": "dispatch-content-tracker",
+      "name": "Dispatch Content Tracker",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1980,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_CONTENT_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dispatch-competitor-gap",
+      "name": "Dispatch Competitor Gap",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_COMPETITOR_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dispatch-seo-monitor",
+      "name": "Dispatch SEO Monitor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2420,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_MONITOR_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dispatch-backlinks",
+      "name": "Dispatch Backlinks",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_BACKLINK_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dispatch-gsc-csv",
+      "name": "Dispatch GSC CSV",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2860,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_GSC_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dispatch-content-gen",
+      "name": "Dispatch Content Gen",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3080,
+        -40
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $env.SEO_AUDIT_CONTENT_GEN_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
       "id": "read-keyword-findings",
       "name": "Read Keyword Findings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1980,
+        3300,
         -40
       ],
       "parameters": {
@@ -235,7 +355,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2200,
+        3520,
         -40
       ],
       "parameters": {
@@ -267,7 +387,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2420,
+        3740,
         -40
       ],
       "parameters": {
@@ -294,17 +414,209 @@
       }
     },
     {
+      "id": "read-content-findings",
+      "name": "Read Content Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3960,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_content_findings?select=finding_id,url,issue_class,severity,target_keyword,detail,recommendation,evidence,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&status=eq.open&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "read-competitor-gaps",
+      "name": "Read Competitor Gaps",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4180,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_competitor_gaps?select=finding_id,keyword,competitor,competitor_rank,target_rank,search_volume,keyword_difficulty,cluster_label,recommendation,evidence,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&status=eq.open&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "read-monitor-events",
+      "name": "Read Monitor Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4400,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_monitor_events?select=event_id,url,change_class,severity,before,after,run_date&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "read-backlink-findings",
+      "name": "Read Backlink Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4620,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_backlink_findings?select=finding_id,domain,finding_class,referring_domain,competitor,domain_authority,anchor,recommendation,evidence,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&status=eq.open&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "read-gsc-findings",
+      "name": "Read GSC Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4840,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_gsc_findings?select=finding_id,query,page,finding_class,impressions,current_ctr,position,expected_ctr,recommendation,evidence,run_date&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "read-content-briefs",
+      "name": "Read Content Briefs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        5060,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_content_briefs?select=brief_id,target_keyword,cluster_label,recommended_title,target_intent,word_count_target,status,run_date&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&order=run_date.desc&limit=200",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
       "id": "normalize",
       "name": "Normalize",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2640,
+        5280,
         -40
       ],
       "parameters": {
         "language": "javaScript",
-        "jsCode": "function normUrl(u) {\n  if (u == null) return null;\n  let s = String(u).trim(); if (!s) return null;\n  s = s.replace(/#.*$/, '').replace(/\\?.*$/, '');\n  s = s.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '');\n  s = s.replace(/\\/+$/, '');\n  return s.toLowerCase() || null;\n}\nfunction rows(nodeName) {\n  // Returns { ok, rows[] } for a child read node. A missing node / non-2xx / empty body → not ok.\n  let resp;\n  try { resp = ($(nodeName).all()[0] || {}).json || {}; } catch (e) { return { ok: false, rows: [] }; }\n  const status = Number(resp.statusCode || 0);\n  if (status && (status < 200 || status >= 300)) return { ok: false, rows: [] };\n  let r = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(r)) r = r ? [r] : [];\n  return { ok: true, rows: r };\n}\nconst SEV_ORDER = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };\nconst items = $input.all();\nconst cfg = (items[0] && items[0].json) || {};\nconst include = Array.isArray(cfg.__include) ? cfg.__include : [];\nconst childStatus = Object.assign({}, cfg.__child_status || {});\nconst findings = [];\n\n// --- keyword_research → tmpl_seo_keyword_research rows ---\nif (include.indexOf('keyword_research') !== -1) {\n  const kw = rows('Read Keyword Findings');\n  if (!kw.ok) { childStatus.keyword_research = 'error'; }\n  else if (kw.rows.length === 0) { childStatus.keyword_research = 'no_data'; }\n  else {\n    childStatus.keyword_research = 'ok';\n    for (const r of kw.rows) {\n      if (!r || r.keyword == null) continue;\n      const vol = Number(r.search_volume) || 0;\n      const kd = r.keyword_difficulty == null ? null : Number(r.keyword_difficulty);\n      // Opportunity severity band: high volume + low difficulty is the strongest signal.\n      let sev = 'low';\n      if (vol >= 500 && (kd == null || kd <= 40)) sev = 'high';\n      else if (vol >= 100) sev = 'medium';\n      findings.push({\n        finding_id: (r.source_facts && r.source_facts.keyword_id) || ('KW-' + String(r.keyword)),\n        source_brick: 'keyword_research',\n        url: null,\n        keyword: String(r.keyword),\n        issue_class: 'kw:opportunity',\n        severity: sev,\n        evidence: { search_volume: vol, keyword_difficulty: kd, cpc: r.cpc == null ? null : Number(r.cpc), cluster_label: r.cluster_label || null, intent: r.intent || null },\n      });\n    }\n  }\n}\n\n// --- technical_audit → tmpl_seo_technical_findings rows ---\nif (include.indexOf('technical_audit') !== -1) {\n  const tech = rows('Read Technical Findings');\n  if (!tech.ok) { childStatus.technical_audit = 'error'; }\n  else if (tech.rows.length === 0) { childStatus.technical_audit = 'no_data'; }\n  else {\n    childStatus.technical_audit = 'ok';\n    for (const r of tech.rows) {\n      if (!r || !r.finding_id) continue;\n      const sev = SEV_ORDER[r.severity] ? r.severity : 'info';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'technical_audit',\n        url: r.url != null ? String(r.url) : null,\n        keyword: null,\n        issue_class: 'tech:' + (r.issue_class || 'unknown'),\n        severity: sev,\n        evidence: Object.assign({}, r.evidence || {}, r.cwv ? { cwv: r.cwv } : {}, { detail: r.detail || null }),\n      });\n    }\n  }\n}\n\n// --- rank_tracker → tmpl_seo_findings rows (seo-improver opportunity ledger) ---\nif (include.indexOf('rank_tracker') !== -1) {\n  const rank = rows('Read Rank Findings');\n  if (!rank.ok) { childStatus.rank_tracker = 'error'; }\n  else if (rank.rows.length === 0) { childStatus.rank_tracker = 'no_data'; }\n  else {\n    childStatus.rank_tracker = 'ok';\n    const CLASS_SEV = { 'SEO-STRIKE': 'high', 'SEO-DECAY': 'high', 'SEO-CANN': 'medium', 'SEO-CTR': 'medium' };\n    for (const r of rank.rows) {\n      if (!r || !r.finding_id) continue;\n      const cls = r.class || 'SEO-UNKNOWN';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'rank_tracker',\n        url: r.target_url != null ? String(r.target_url) : null,\n        keyword: r.target_keyword != null ? String(r.target_keyword) : null,\n        issue_class: 'rank:' + cls,\n        severity: CLASS_SEV[cls] || 'medium',\n        evidence: Object.assign({}, r.evidence || {}, r.recommendation ? { recommendation: r.recommendation } : {}),\n      });\n    }\n  }\n}\n\n// entity = normalized url when present, else the keyword (the dedup key subject).\nfor (const f of findings) { f.entity = normUrl(f.url) || (f.keyword ? String(f.keyword).toLowerCase() : null); }\nconst factsOk = findings.length > 0;\nreturn [{ json: Object.assign({}, cfg, {\n  __child_status: childStatus,\n  __findings: findings,\n  __facts_ok: factsOk,\n}) }];"
+        "jsCode": "function normUrl(u) {\n  if (u == null) return null;\n  let s = String(u).trim(); if (!s) return null;\n  s = s.replace(/#.*$/, '').replace(/\\?.*$/, '');\n  s = s.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '');\n  s = s.replace(/\\/+$/, '');\n  return s.toLowerCase() || null;\n}\nfunction rows(nodeName) {\n  // Returns { ok, rows[] } for a child read node. A missing node / non-2xx / empty body → not ok.\n  let resp;\n  try { resp = ($(nodeName).all()[0] || {}).json || {}; } catch (e) { return { ok: false, rows: [] }; }\n  const status = Number(resp.statusCode || 0);\n  if (status && (status < 200 || status >= 300)) return { ok: false, rows: [] };\n  let r = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(r)) r = r ? [r] : [];\n  return { ok: true, rows: r };\n}\nconst SEV_ORDER = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };\nconst items = $input.all();\nconst cfg = (items[0] && items[0].json) || {};\nconst include = Array.isArray(cfg.__include) ? cfg.__include : [];\nconst childStatus = Object.assign({}, cfg.__child_status || {});\nconst findings = [];\n\n// --- keyword_research → tmpl_seo_keyword_research rows ---\nif (include.indexOf('keyword_research') !== -1) {\n  const kw = rows('Read Keyword Findings');\n  if (!kw.ok) { childStatus.keyword_research = 'error'; }\n  else if (kw.rows.length === 0) { childStatus.keyword_research = 'no_data'; }\n  else {\n    childStatus.keyword_research = 'ok';\n    for (const r of kw.rows) {\n      if (!r || r.keyword == null) continue;\n      const vol = Number(r.search_volume) || 0;\n      const kd = r.keyword_difficulty == null ? null : Number(r.keyword_difficulty);\n      // Opportunity severity band: high volume + low difficulty is the strongest signal.\n      let sev = 'low';\n      if (vol >= 500 && (kd == null || kd <= 40)) sev = 'high';\n      else if (vol >= 100) sev = 'medium';\n      findings.push({\n        finding_id: (r.source_facts && r.source_facts.keyword_id) || ('KW-' + String(r.keyword)),\n        source_brick: 'keyword_research',\n        url: null,\n        keyword: String(r.keyword),\n        issue_class: 'kw:opportunity',\n        severity: sev,\n        evidence: { search_volume: vol, keyword_difficulty: kd, cpc: r.cpc == null ? null : Number(r.cpc), cluster_label: r.cluster_label || null, intent: r.intent || null },\n      });\n    }\n  }\n}\n\n// --- technical_audit → tmpl_seo_technical_findings rows ---\nif (include.indexOf('technical_audit') !== -1) {\n  const tech = rows('Read Technical Findings');\n  if (!tech.ok) { childStatus.technical_audit = 'error'; }\n  else if (tech.rows.length === 0) { childStatus.technical_audit = 'no_data'; }\n  else {\n    childStatus.technical_audit = 'ok';\n    for (const r of tech.rows) {\n      if (!r || !r.finding_id) continue;\n      const sev = SEV_ORDER[r.severity] ? r.severity : 'info';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'technical_audit',\n        url: r.url != null ? String(r.url) : null,\n        keyword: null,\n        issue_class: 'tech:' + (r.issue_class || 'unknown'),\n        severity: sev,\n        evidence: Object.assign({}, r.evidence || {}, r.cwv ? { cwv: r.cwv } : {}, { detail: r.detail || null }),\n      });\n    }\n  }\n}\n\n// --- rank_tracker → tmpl_seo_findings rows (seo-improver opportunity ledger) ---\nif (include.indexOf('rank_tracker') !== -1) {\n  const rank = rows('Read Rank Findings');\n  if (!rank.ok) { childStatus.rank_tracker = 'error'; }\n  else if (rank.rows.length === 0) { childStatus.rank_tracker = 'no_data'; }\n  else {\n    childStatus.rank_tracker = 'ok';\n    const CLASS_SEV = { 'SEO-STRIKE': 'high', 'SEO-DECAY': 'high', 'SEO-CANN': 'medium', 'SEO-CTR': 'medium' };\n    for (const r of rank.rows) {\n      if (!r || !r.finding_id) continue;\n      const cls = r.class || 'SEO-UNKNOWN';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'rank_tracker',\n        url: r.target_url != null ? String(r.target_url) : null,\n        keyword: r.target_keyword != null ? String(r.target_keyword) : null,\n        issue_class: 'rank:' + cls,\n        severity: CLASS_SEV[cls] || 'medium',\n        evidence: Object.assign({}, r.evidence || {}, r.recommendation ? { recommendation: r.recommendation } : {}),\n      });\n    }\n  }\n}\n\n// --- content_tracker → tmpl_seo_content_findings rows (on-page content gaps) ---\nif (include.indexOf('content_tracker') !== -1) {\n  const content = rows('Read Content Findings');\n  if (!content.ok) { childStatus.content_tracker = 'error'; }\n  else if (content.rows.length === 0) { childStatus.content_tracker = 'no_data'; }\n  else {\n    childStatus.content_tracker = 'ok';\n    for (const r of content.rows) {\n      if (!r || !r.finding_id) continue;\n      const sev = SEV_ORDER[r.severity] ? r.severity : 'info';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'content_tracker',\n        url: r.url != null ? String(r.url) : null,\n        keyword: r.target_keyword != null ? String(r.target_keyword) : null,\n        issue_class: 'content:' + (r.issue_class || 'unknown'),\n        severity: sev,\n        evidence: Object.assign({}, r.evidence || {}, r.recommendation ? { recommendation: r.recommendation } : {}, { detail: r.detail || null }),\n      });\n    }\n  }\n}\n\n// --- competitor_gap → tmpl_seo_competitor_gaps rows (terms rivals own that we do not) ---\nif (include.indexOf('competitor_gap') !== -1) {\n  const gap = rows('Read Competitor Gaps');\n  if (!gap.ok) { childStatus.competitor_gap = 'error'; }\n  else if (gap.rows.length === 0) { childStatus.competitor_gap = 'no_data'; }\n  else {\n    childStatus.competitor_gap = 'ok';\n    for (const r of gap.rows) {\n      if (!r || !r.finding_id) continue;\n      // Winnability severity band: a pure gap (we do not rank at all) on decent volume/low\n      // difficulty is the strongest opportunity signal; grounded on the DataForSEO facts.\n      const vol = r.search_volume == null ? null : Number(r.search_volume);\n      const kd = r.keyword_difficulty == null ? null : Number(r.keyword_difficulty);\n      const pureGap = r.target_rank == null;\n      let sev = 'low';\n      if (pureGap && (vol == null || vol >= 500) && (kd == null || kd <= 40)) sev = 'high';\n      else if (pureGap || (vol != null && vol >= 100)) sev = 'medium';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'competitor_gap',\n        url: null,\n        keyword: r.keyword != null ? String(r.keyword) : null,\n        issue_class: 'gap:opportunity',\n        severity: sev,\n        evidence: Object.assign({}, r.evidence || {}, {\n          competitor: r.competitor == null ? null : String(r.competitor),\n          competitor_rank: r.competitor_rank == null ? null : Number(r.competitor_rank),\n          target_rank: r.target_rank == null ? null : Number(r.target_rank),\n          search_volume: vol, keyword_difficulty: kd,\n          cluster_label: r.cluster_label || null,\n          recommendation: r.recommendation || null,\n        }),\n      });\n    }\n  }\n}\n\n// --- seo_monitor → tmpl_seo_monitor_events rows (health-regression change events) ---\nif (include.indexOf('seo_monitor') !== -1) {\n  const mon = rows('Read Monitor Events');\n  if (!mon.ok) { childStatus.seo_monitor = 'error'; }\n  else if (mon.rows.length === 0) { childStatus.seo_monitor = 'no_data'; }\n  else {\n    childStatus.seo_monitor = 'ok';\n    for (const r of mon.rows) {\n      if (!r || !r.event_id) continue;\n      const sev = SEV_ORDER[r.severity] ? r.severity : 'info';\n      findings.push({\n        finding_id: String(r.event_id),\n        source_brick: 'seo_monitor',\n        url: r.url != null ? String(r.url) : null,\n        keyword: null,\n        issue_class: 'monitor:' + (r.change_class || 'unknown'),\n        severity: sev,\n        evidence: { change_class: r.change_class || null, before: r.before == null ? null : String(r.before), after: r.after == null ? null : String(r.after) },\n      });\n    }\n  }\n}\n\n// --- backlinks → tmpl_seo_backlink_findings rows (link authority / toxic / referrers / gaps) ---\nif (include.indexOf('backlinks') !== -1) {\n  const bl = rows('Read Backlink Findings');\n  if (!bl.ok) { childStatus.backlinks = 'error'; }\n  else if (bl.rows.length === 0) { childStatus.backlinks = 'no_data'; }\n  else {\n    childStatus.backlinks = 'ok';\n    // finding_class ∈ authority|toxic|referring_domain|anchor|link_gap. The actionable classes are\n    // link_gap (outreach) + toxic (disavow); authority/referring_domain/anchor are profile facts —\n    // fold link_gap + toxic as tasks, keep the rest as low-severity context so nothing is invented.\n    const BL_SEV = { link_gap: 'medium', toxic: 'high', referring_domain: 'info', anchor: 'info', authority: 'info' };\n    for (const r of bl.rows) {\n      if (!r || !r.finding_id) continue;\n      const cls = r.finding_class || 'unknown';\n      // Entity = the gap/referrer domain when present, else the target's own domain (authority/toxic).\n      const ent = (r.referring_domain != null && String(r.referring_domain).trim()) ? String(r.referring_domain) : (r.domain != null ? String(r.domain) : null);\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'backlinks',\n        url: null,\n        keyword: ent,\n        issue_class: 'backlink:' + cls,\n        severity: BL_SEV[cls] || 'low',\n        evidence: Object.assign({}, r.evidence || {}, {\n          referring_domain: r.referring_domain == null ? null : String(r.referring_domain),\n          competitor: r.competitor == null ? null : String(r.competitor),\n          domain_authority: r.domain_authority == null ? null : Number(r.domain_authority),\n          anchor: r.anchor == null ? null : String(r.anchor),\n          recommendation: r.recommendation || null,\n        }),\n      });\n    }\n  }\n}\n\n// --- gsc_csv → tmpl_seo_gsc_findings rows (CTR opportunity / cannibalization) ---\nif (include.indexOf('gsc_csv') !== -1) {\n  const gsc = rows('Read GSC Findings');\n  if (!gsc.ok) { childStatus.gsc_csv = 'error'; }\n  else if (gsc.rows.length === 0) { childStatus.gsc_csv = 'no_data'; }\n  else {\n    childStatus.gsc_csv = 'ok';\n    // finding_class ∈ ctr_opportunity|cannibalization. ctr = a quick title/meta rewrite (medium);\n    // cannibalization = a consolidation decision spanning ≥2 pages (higher, structural).\n    const GSC_SEV = { ctr_opportunity: 'medium', cannibalization: 'high' };\n    for (const r of gsc.rows) {\n      if (!r || !r.finding_id) continue;\n      const cls = r.finding_class || 'unknown';\n      findings.push({\n        finding_id: String(r.finding_id),\n        source_brick: 'gsc_csv',\n        url: r.page != null ? String(r.page) : null,\n        keyword: r.query != null ? String(r.query) : null,\n        issue_class: 'gsc:' + cls,\n        severity: GSC_SEV[cls] || 'low',\n        evidence: Object.assign({}, r.evidence || {}, {\n          impressions: r.impressions == null ? null : Number(r.impressions),\n          current_ctr: r.current_ctr == null ? null : Number(r.current_ctr),\n          position: r.position == null ? null : Number(r.position),\n          expected_ctr: r.expected_ctr == null ? null : Number(r.expected_ctr),\n          recommendation: r.recommendation || null,\n        }),\n      });\n    }\n  }\n}\n\n// --- content_gen → tmpl_seo_content_briefs rows (a brief = a \"create this content\" task) ---\nif (include.indexOf('content_gen') !== -1) {\n  const briefs = rows('Read Content Briefs');\n  if (!briefs.ok) { childStatus.content_gen = 'error'; }\n  else if (briefs.rows.length === 0) { childStatus.content_gen = 'no_data'; }\n  else {\n    childStatus.content_gen = 'ok';\n    for (const r of briefs.rows) {\n      if (!r || !r.brief_id) continue;\n      // A brief is a create-this-content task keyed on the target keyword. drafted=has a real title.\n      const drafted = !!(r.recommended_title && String(r.recommended_title).trim());\n      findings.push({\n        finding_id: String(r.brief_id),\n        source_brick: 'content_gen',\n        url: null,\n        keyword: r.target_keyword != null ? String(r.target_keyword) : null,\n        issue_class: 'content_brief:' + (drafted ? 'drafted' : 'pending'),\n        severity: 'medium',\n        evidence: {\n          target_keyword: r.target_keyword == null ? null : String(r.target_keyword),\n          cluster_label: r.cluster_label == null ? null : String(r.cluster_label),\n          recommended_title: r.recommended_title == null ? null : String(r.recommended_title),\n          target_intent: r.target_intent == null ? null : String(r.target_intent),\n          word_count_target: r.word_count_target == null ? null : Number(r.word_count_target),\n          status: r.status == null ? null : String(r.status),\n        },\n      });\n    }\n  }\n}\n\n// entity = normalized url when present, else the keyword (the dedup key subject).\nfor (const f of findings) { f.entity = normUrl(f.url) || (f.keyword ? String(f.keyword).toLowerCase() : null); }\nconst factsOk = findings.length > 0;\nreturn [{ json: Object.assign({}, cfg, {\n  __child_status: childStatus,\n  __findings: findings,\n  __facts_ok: factsOk,\n}) }];"
       },
       "alwaysOutputData": true
     },
@@ -314,7 +626,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2860,
+        5500,
         -40
       ],
       "parameters": {
@@ -329,12 +641,12 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3080,
+        5720,
         -40
       ],
       "parameters": {
         "language": "javaScript",
-        "jsCode": "const SEV_IMPACT = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };\n// Effort heuristic per issue-class fragment (higher = costlier fix). Restructures cost most.\nfunction effortFor(classes) {\n  let e = 2; // default (a copy/meta tweak)\n  for (const c of classes) {\n    if (c === 'tech:duplicate' || c === 'rank:SEO-CANN') e = Math.max(e, 5);\n    else if (c === 'tech:canonical' || c === 'tech:links' || c === 'rank:SEO-DECAY') e = Math.max(e, 4);\n    else if (c === 'tech:perf' || c === 'kw:opportunity') e = Math.max(e, 3);\n    else if (c === 'rank:SEO-STRIKE') e = Math.max(e, 3);\n    else if (c === 'tech:meta' || c === 'tech:status' || c === 'tech:indexability') e = Math.max(e, 1);\n  }\n  return Math.min(5, Math.max(1, e));\n}\nconst items = $input.all();\nconst j = (items[0] && items[0].json) || {};\nconst tasks = Array.isArray(j.__tasks) ? j.__tasks : [];\nconst ranked = tasks.map((t) => {\n  let impact = SEV_IMPACT[t.severity] || 1;\n  // Cross-brick corroboration lifts impact (two independent checks agreeing = higher confidence).\n  if (t.cross_brick >= 2) impact = Math.min(5, impact + 1);\n  // Keyword volume band lift (grounded on the kw evidence when present).\n  const kwEv = (t.evidence && t.evidence.keyword_research) || {};\n  if (Number(kwEv.search_volume) >= 1000) impact = Math.min(5, impact + 1);\n  const effort = effortFor(t.issue_classes || []);\n  // Impact is the DOMINANT term (×10 outranks the 1..5 effort tiebreaker), so a critical fix is\n  // never buried under a trivial easy one; among equal-impact tasks the lower-effort quick win\n  // ranks first via (6 - effort).\n  const priority_score = impact * 10 + (6 - effort);\n  return Object.assign({}, t, { impact: impact, effort: effort, priority_score: priority_score });\n});\nranked.sort((a, b) => {\n  if (b.priority_score !== a.priority_score) return b.priority_score - a.priority_score;\n  if (b.impact !== a.impact) return b.impact - a.impact;\n  return (b.cross_brick || 0) - (a.cross_brick || 0);\n});\nreturn [{ json: Object.assign({}, j, { __queue: ranked }) }];"
+        "jsCode": "const SEV_IMPACT = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };\n// Effort heuristic per issue-class fragment (higher = costlier fix). Restructures cost most.\nfunction effortFor(classes) {\n  let e = 2; // default (a copy/meta tweak)\n  for (const c of classes) {\n    if (c === 'tech:duplicate' || c === 'rank:SEO-CANN') e = Math.max(e, 5);\n    else if (c === 'tech:canonical' || c === 'tech:links' || c === 'rank:SEO-DECAY') e = Math.max(e, 4);\n    else if (c === 'tech:perf' || c === 'kw:opportunity') e = Math.max(e, 3);\n    else if (c === 'rank:SEO-STRIKE') e = Math.max(e, 3);\n    // content gaps: a whole new page / thin-content rewrite is a content lift; a coverage/intent\n    // gap needs new copy; title/meta/headings are quick edits. competitor gap = a new content\n    // piece to win the term (3). monitor: a regression FIX (revert a change) is cheap.\n    else if (c === 'content:thin' || c === 'content:coverage' || c === 'content:intent') e = Math.max(e, 3);\n    else if (c === 'gap:opportunity') e = Math.max(e, 3);\n    // backlinks: outreach for a link gap / disavow of toxic links is a multi-touch off-page effort;\n    // profile-context classes (referring_domain/anchor/authority) are cheap notes.\n    else if (c === 'backlink:link_gap' || c === 'backlink:toxic') e = Math.max(e, 4);\n    else if (c === 'backlink:referring_domain' || c === 'backlink:anchor' || c === 'backlink:authority') e = Math.max(e, 1);\n    // gsc: a CTR title/meta rewrite is a quick edit; cannibalization is a page-consolidation restructure.\n    else if (c === 'gsc:cannibalization') e = Math.max(e, 4);\n    else if (c === 'gsc:ctr_opportunity') e = Math.max(e, 1);\n    // content brief: create-this-content is a whole new page — the costliest lift.\n    else if (c === 'content_brief:drafted' || c === 'content_brief:pending') e = Math.max(e, 5);\n    else if (c === 'content:headings') e = Math.max(e, 2);\n    else if (c === 'content:title' || c === 'content:meta') e = Math.max(e, 1);\n    else if (c === 'monitor:indexability' || c === 'monitor:robots' || c === 'monitor:canonical' ||\n             c === 'monitor:status' || c === 'monitor:title' || c === 'monitor:meta' || c === 'monitor:sitemap') e = Math.max(e, 1);\n    else if (c === 'tech:meta' || c === 'tech:status' || c === 'tech:indexability') e = Math.max(e, 1);\n  }\n  return Math.min(5, Math.max(1, e));\n}\nconst items = $input.all();\nconst j = (items[0] && items[0].json) || {};\nconst tasks = Array.isArray(j.__tasks) ? j.__tasks : [];\nconst ranked = tasks.map((t) => {\n  let impact = SEV_IMPACT[t.severity] || 1;\n  // Cross-brick corroboration lifts impact (two independent checks agreeing = higher confidence).\n  if (t.cross_brick >= 2) impact = Math.min(5, impact + 1);\n  // Keyword volume band lift (grounded on the kw evidence when present).\n  const kwEv = (t.evidence && t.evidence.keyword_research) || {};\n  if (Number(kwEv.search_volume) >= 1000) impact = Math.min(5, impact + 1);\n  const effort = effortFor(t.issue_classes || []);\n  // Impact is the DOMINANT term (×10 outranks the 1..5 effort tiebreaker), so a critical fix is\n  // never buried under a trivial easy one; among equal-impact tasks the lower-effort quick win\n  // ranks first via (6 - effort).\n  const priority_score = impact * 10 + (6 - effort);\n  return Object.assign({}, t, { impact: impact, effort: effort, priority_score: priority_score });\n});\nranked.sort((a, b) => {\n  if (b.priority_score !== a.priority_score) return b.priority_score - a.priority_score;\n  if (b.impact !== a.impact) return b.impact - a.impact;\n  return (b.cross_brick || 0) - (a.cross_brick || 0);\n});\nreturn [{ json: Object.assign({}, j, { __queue: ranked }) }];"
       },
       "alwaysOutputData": true
     },
@@ -344,7 +656,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        3300,
+        5940,
         -40
       ],
       "parameters": {
@@ -377,7 +689,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        3520,
+        6160,
         -120
       ],
       "parameters": {
@@ -397,7 +709,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3740,
+        6380,
         -120
       ],
       "parameters": {
@@ -412,7 +724,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3520,
+        6160,
         100
       ],
       "parameters": {
@@ -426,7 +738,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3960,
+        6600,
         -40
       ],
       "parameters": {
@@ -441,7 +753,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        4180,
+        6820,
         -40
       ],
       "parameters": {
@@ -485,7 +797,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        4400,
+        7040,
         -40
       ],
       "parameters": {
@@ -529,7 +841,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4620,
+        7260,
         -40
       ],
       "parameters": {
@@ -543,7 +855,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        4840,
+        7480,
         -40
       ],
       "parameters": {
@@ -682,6 +994,72 @@
       "main": [
         [
           {
+            "node": "Dispatch Content Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Content Tracker": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Competitor Gap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Competitor Gap": {
+      "main": [
+        [
+          {
+            "node": "Dispatch SEO Monitor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch SEO Monitor": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Backlinks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Backlinks": {
+      "main": [
+        [
+          {
+            "node": "Dispatch GSC CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch GSC CSV": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Content Gen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Content Gen": {
+      "main": [
+        [
+          {
             "node": "Read Keyword Findings",
             "type": "main",
             "index": 0
@@ -712,6 +1090,72 @@
       ]
     },
     "Read Rank Findings": {
+      "main": [
+        [
+          {
+            "node": "Read Content Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Content Findings": {
+      "main": [
+        [
+          {
+            "node": "Read Competitor Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Competitor Gaps": {
+      "main": [
+        [
+          {
+            "node": "Read Monitor Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Monitor Events": {
+      "main": [
+        [
+          {
+            "node": "Read Backlink Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Backlink Findings": {
+      "main": [
+        [
+          {
+            "node": "Read GSC Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read GSC Findings": {
+      "main": [
+        [
+          {
+            "node": "Read Content Briefs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Content Briefs": {
       "main": [
         [
           {
