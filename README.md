@@ -31,11 +31,11 @@ and the [Freshness](#freshness-no-drift) section below.
 - **[`components/Webapp/`](components/Webapp/)** — reusable web-app feature-packages
   extracted from Tessera (11 packages — see
   [`components/Webapp/README.md`](components/Webapp/README.md)).
-- **[`components/n8n/`](components/n8n/)** — hosted n8n workflow **templates** (10
+- **[`components/n8n/`](components/n8n/)** — hosted n8n workflow **templates** (22
   importable workflow definitions for the studio's own instance — see
   [`components/n8n/README.md`](components/n8n/README.md)).
 - **[`components/supabase/`](components/supabase/)** — reusable Supabase **schema
-  templates** (6 idempotent RLS migrations / 7 tables for the §8.1 data shapes — see
+  templates** (20 idempotent RLS migrations / 25 tables for the §8.1 data shapes — see
   [`components/supabase/README.md`](components/supabase/README.md)).
 
 ## `components/Claude/` — agent-side tooling
