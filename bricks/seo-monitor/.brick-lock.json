@@ -1,0 +1,9 @@
+{
+  "brick": "seo-monitor",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/seo-monitor.json": "b2983bb8cb73036e6eee8b77bedff8e4ca3877e92001a1c4572ac5890f0f2d59",
+    "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
+    "supabase/templates/seo-monitor.sql": "93bc2cc9d3eb6019f6e48816a3ee4f109230ef15aa1b2c3620a7720925a482c3"
+  }
+}

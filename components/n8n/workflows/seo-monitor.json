@@ -1,0 +1,738 @@
+{
+  "name": "[TEMPLATE] [seo_monitor_plugin] SEO Health Monitor — Firecrawl-diff → change events → alert",
+  "nodes": [
+    {
+      "id": "every-day",
+      "name": "Every Day",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "confirm-config",
+      "name": "Confirm Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return v === null || v === undefined ? null : v; } catch (e) { return null; } }\nconst tenant = (function () { const v = safe(() => (($vars.SEO_TENANT || 'operand'))); return (v === null || String(v).trim() === '') ? 'operand' : String(v).trim(); })();\nconst rawUrls = safe(() => ($vars.SEO_MONITOR_URLS));\nlet urls = [];\nif (Array.isArray(rawUrls)) urls = rawUrls;\nelse if (typeof rawUrls === 'string' && rawUrls.trim()) {\n  const s = rawUrls.trim();\n  if (s[0] === '[') { try { const p = JSON.parse(s); if (Array.isArray(p)) urls = p; } catch (e) { urls = []; } }\n  if (!urls.length) urls = s.split(',');\n}\nurls = urls.map((x) => String(x || '').trim()).filter((x) => x && /^https?:\\/\\//.test(x));\nconst seen = {}; urls = urls.filter((x) => (seen[x] ? false : (seen[x] = true)));\nconst now = Date.now();\nconst runMs = new Date(new Date(now).setUTCHours(0, 0, 0, 0)).getTime();\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nreturn [{ json: { __tenant: tenant, __urls: urls, __run_date: day(runMs) } }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "spend-read",
+      "name": "Spend Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/global_send_quotas?select=spend_usd,count&channel=eq.firecrawl&sender_id=eq.firecrawl-daily&window_start=eq.{{ encodeURIComponent(new Date().toISOString().slice(0,10)) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "spend-gate",
+      "name": "Spend Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"SEO_FIRECRAWL_DAILY_CAP\"));\nconst ctx = $('Confirm Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const row = rows[0] || {};\n  const spent = Number(row.spend_usd != null ? row.spend_usd : (row.count != null ? row.count : 0)) || 0;\n  // No cap configured → do not block (fail-open); a finite cap gates at the boundary.\n  const under = !Number.isFinite(CAP) || CAP <= 0 ? true : spent < CAP;\n  out.push({ json: Object.assign({}, c, { __spend_under_cap: under }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "crawl",
+      "name": "Crawl?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "crawl-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "skip-crawl",
+      "name": "Skip Crawl",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: Object.assign({}, it.json, {\n  __facts_ok: false,\n  __facts_reason: 'firecrawl_spend_cap',\n  __current: [],\n}) }));"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "fan-urls",
+      "name": "Fan URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  const urls = Array.isArray(j.__urls) ? j.__urls : [];\n  for (const u of urls) {\n    out.push({ json: { __url: u, __tenant: j.__tenant, __run_date: j.__run_date } });\n  }\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "firecrawl-scrape",
+      "name": "Firecrawl Scrape",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=($vars.FIRECRAWL_HOST || 'https://api.firecrawl.dev')/v2/scrape",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ url: $json.__url, formats: ['rawHtml'], onlyMainContent: false }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:firecrawl",
+          "name": "[OPERAND] Firecrawl Bearer"
+        }
+      }
+    },
+    {
+      "id": "extract-elements",
+      "name": "Extract Elements",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Fan URLs').all();\nconst items = $input.all();\nconst out = [];\nfunction metaRobots(html, metadataRobots) {\n  if (metadataRobots != null && String(metadataRobots).trim()) return String(metadataRobots).trim();\n  const s = String(html || '');\n  const m = s.match(/<meta[^>]+name=[\"']robots[\"'][^>]*>/i);\n  if (!m) return null;\n  const c = m[0].match(/content=[\"']([^\"']*)[\"']/i);\n  return c ? c[1].trim() : null;\n}\nfunction canonicalOf(html, metaCanonical) {\n  if (metaCanonical != null && String(metaCanonical).trim()) return String(metaCanonical).trim();\n  const s = String(html || '');\n  const m = s.match(/<link[^>]+rel=[\"']canonical[\"'][^>]*>/i);\n  if (!m) return null;\n  const h = m[0].match(/href=[\"']([^\"']*)[\"']/i);\n  return h ? h[1].trim() : null;\n}\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const url = c.__url != null ? String(c.__url) : null;\n  const httpStatus = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let reason = null;\n  let el = null;\n  if (httpStatus === 401 || httpStatus === 403) { reason = 'firecrawl_unauthorized'; }\n  else if (httpStatus === 429) { reason = 'firecrawl_rate_limited'; }\n  else if (httpStatus && (httpStatus < 200 || httpStatus >= 300)) { reason = 'firecrawl_error_' + httpStatus; }\n  else if (!parsed || typeof parsed !== 'object') { reason = 'firecrawl_unparseable'; }\n  else if (parsed.success === false) { reason = 'firecrawl_failed'; }\n  else {\n    const data = (parsed.data && typeof parsed.data === 'object') ? parsed.data : parsed;\n    const md = (data.metadata && typeof data.metadata === 'object') ? data.metadata : {};\n    const html = data.rawHtml || data.html || '';\n    // Firecrawl surfaces the PAGE's own HTTP status as metadata.statusCode.\n    const pageStatus = Number.isFinite(Number(md.statusCode)) ? Number(md.statusCode) : null;\n    const title = md.title != null ? String(md.title) : null;\n    const desc = (md.description != null ? md.description : md['og:description']);\n    const metaDesc = desc != null ? String(desc) : null;\n    const robots = metaRobots(html, md.robots);\n    const xRobots = md['x-robots-tag'] != null ? String(md['x-robots-tag']) : (md.xRobotsTag != null ? String(md.xRobotsTag) : null);\n    const canonical = canonicalOf(html, md.canonical || md['canonicalUrl']);\n    // sitemap_present: a <link rel=\"sitemap\"> hint or a sitemap reference in the html.\n    const sitemapPresent = /rel=[\"']sitemap[\"']/i.test(String(html)) || /sitemap\\.xml/i.test(String(html));\n    // Derived indexability: a noindex/none directive (meta or header) OR a 4xx/5xx page is NOT indexable.\n    const robotsBlob = ((robots || '') + ' ' + (xRobots || '')).toLowerCase();\n    const blocked = /\\bnoindex\\b/.test(robotsBlob) || /\\bnone\\b/.test(robotsBlob);\n    const statusBad = pageStatus != null && (pageStatus < 200 || pageStatus >= 400);\n    const indexable = !blocked && !statusBad;\n    el = {\n      url: url,\n      title: title,\n      meta_description: metaDesc,\n      robots: robots,\n      x_robots: xRobots,\n      canonical: canonical,\n      http_status: pageStatus,\n      indexable: indexable,\n      sitemap_present: sitemapPresent,\n      raw: { title: title, description: metaDesc, robots: robots, x_robots: xRobots, canonical: canonical, statusCode: pageStatus },\n    };\n  }\n  out.push({ json: Object.assign({}, c, {\n    __element: el,               // null when the scrape failed (honest-empty)\n    __scrape_reason: reason,     // a firecrawl_* reason, or null on success\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "collect-current",
+      "name": "Collect Current",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\n// If this is the Skip Crawl (over-cap) path it arrives as a single item already carrying\n// __facts_ok=false + __current=[]; pass it straight through.\nif (items.length === 1 && items[0].json && items[0].json.__facts_reason === 'firecrawl_spend_cap') {\n  return [{ json: items[0].json }];\n}\nconst current = [];\nconst reasons = [];\nlet tenant = 'operand';\nlet runDate = null;\nfor (const it of items) {\n  const j = it.json || {};\n  if (j.__tenant) tenant = j.__tenant;\n  if (j.__run_date) runDate = j.__run_date;\n  if (j.__element && typeof j.__element === 'object') current.push(j.__element);\n  else if (j.__scrape_reason) reasons.push({ url: j.__url || (j.__element && j.__element.url) || null, reason: j.__scrape_reason });\n}\nreturn [{ json: {\n  __tenant: tenant,\n  __run_date: runDate,\n  __current: current,\n  __scrape_reasons: reasons,\n  __facts_ok: current.length > 0,\n  __facts_reason: current.length > 0 ? null : (reasons[0] ? reasons[0].reason : 'firecrawl_no_urls'),\n} }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-prior",
+      "name": "Read Prior",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        -80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_monitor_snapshots?select=url,title,meta_description,robots,canonical,http_status,indexable,raw,run_date&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&order=run_date.desc",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "diff",
+      "name": "Diff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nfunction eid(tenant, url, cls) { return 'MON-' + cls.toUpperCase() + '-' + String(hash((tenant || '') + '|' + (url || '') + '|' + cls) % 1000).padStart(3, '0'); }\nconst RANK = {\"critical\":5,\"high\":4,\"medium\":3,\"low\":2,\"info\":1};\n// A de-indexing directive (noindex / none) is the CRITICAL one — it removes the page from\n// the index. nofollow only drops link-equity flow; it does NOT de-index, so a nofollow-only\n// change is a normal (medium) robots change, never critical (cross-model correction).\nfunction isNoindex(v) { const s = String(v || '').toLowerCase(); return /\\bnoindex\\b/.test(s) || /\\bnone\\b/.test(s); }\nconst ctx = $('Collect Current').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  // GROUNDING GUARD (cross-model): distinguish a genuine empty baseline (200 + []) from a\n  // FAILED prior read (non-2xx). alwaysOutputData means an errored read arrives as an empty\n  // envelope; treating that as \"every URL is baseline\" would silently SUPPRESS real\n  // regressions. On a failed read we emit NO events and record the failure honestly — the\n  // run stays quiet but does NOT falsely claim \"nothing changed\".\n  const priorStatus = Number(resp.statusCode || 0);\n  const priorReadFailed = priorStatus !== 0 && (priorStatus < 200 || priorStatus >= 300);\n  if (priorReadFailed) {\n    out.push({ json: Object.assign({}, c, {\n      __events: [], __baseline_count: 0, __max_severity_rank: 0,\n      __prior_read_failed: true, __prior_read_status: priorStatus,\n    }) });\n    continue;\n  }\n  let priorRows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(priorRows)) priorRows = priorRows ? [priorRows] : [];\n  // Most-recent prior row per URL (run_date desc); the current run's own row (if any) is\n  // excluded so a same-day re-fire does not diff against itself.\n  const priorByUrl = {};\n  for (const r of priorRows) {\n    if (!r || r.url == null) continue;\n    if (r.run_date && c.__run_date && String(r.run_date) >= String(c.__run_date)) continue;\n    const u = String(r.url);\n    const prev = priorByUrl[u];\n    if (!prev || String(r.run_date || '') > String(prev.run_date || '')) priorByUrl[u] = r;\n  }\n  const current = Array.isArray(c.__current) ? c.__current : [];\n  const events = [];\n  let baselineCount = 0;\n  for (const cur of current) {\n    if (!cur || cur.url == null) continue;\n    const url = String(cur.url);\n    const prior = priorByUrl[url];\n    if (!prior) { baselineCount++; continue; } // no prior → baseline, nothing to compare\n    const push = (cls, sev, before, after) => events.push({\n      event_id: eid(c.__tenant, url, cls), url: url, change_class: cls, severity: sev,\n      before: before == null ? null : String(before).slice(0, 500),\n      after: after == null ? null : String(after).slice(0, 500),\n    });\n    // indexability — the headline: true → false is a new de-indexing (critical).\n    const priorIdx = prior.indexable;\n    if (priorIdx === true && cur.indexable === false) push('indexability', 'critical', 'indexable', 'NOT indexable');\n    // robots — a NEW noindex/none (de-indexing) directive is critical; any other robots\n    // change (incl. a nofollow-only change, which does NOT de-index) is medium.\n    const pr = (prior.robots || '') + ' ' + (prior.raw && prior.raw.x_robots ? prior.raw.x_robots : '');\n    const cr = (cur.robots || '') + ' ' + (cur.x_robots || '');\n    if (String(prior.robots || '') !== String(cur.robots || '') || String((prior.raw && prior.raw.x_robots) || '') !== String(cur.x_robots || '')) {\n      const newNoindex = isNoindex(cr) && !isNoindex(pr);\n      push('robots', newNoindex ? 'critical' : 'medium', pr.trim() || '(none)', cr.trim() || '(none)');\n    }\n    // canonical — any change (incl. gained/lost) is high.\n    if (String(prior.canonical || '') !== String(cur.canonical || '')) push('canonical', 'high', prior.canonical, cur.canonical);\n    // status — changed to a 4xx/5xx is critical; other status change medium.\n    const ps = prior.http_status, cs = cur.http_status;\n    if (ps != null && cs != null && Number(ps) !== Number(cs)) {\n      const nowBad = Number(cs) >= 400;\n      push('status', nowBad ? 'critical' : 'medium', ps, cs);\n    }\n    // title — wiped (was → empty) is high; any other change low.\n    const pt = prior.title, ct = cur.title;\n    if (String(pt || '') !== String(ct || '')) {\n      const wiped = pt && String(pt).trim() && (!ct || !String(ct).trim());\n      push('title', wiped ? 'high' : 'low', pt, ct);\n    }\n    // meta description — wiped is medium; any other change low.\n    const pm = prior.meta_description, cm = cur.meta_description;\n    if (String(pm || '') !== String(cm || '')) {\n      const wiped = pm && String(pm).trim() && (!cm || !String(cm).trim());\n      push('meta', wiped ? 'medium' : 'low', pm, cm);\n    }\n    // sitemap — presence lost is medium.\n    if (prior.sitemap_present === true && cur.sitemap_present === false) push('sitemap', 'medium', 'present', 'absent');\n  }\n  const maxRank = events.reduce((m, e) => Math.max(m, RANK[e.severity] || 0), 0);\n  out.push({ json: Object.assign({}, c, {\n    __events: events,\n    __baseline_count: baselineCount,\n    __max_severity_rank: maxRank,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-snapshots",
+      "name": "Write Snapshots",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_monitor_snapshots?on_conflict=tenant,url,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__current || []).map((e) => ({ tenant: $json.__tenant, url: e.url, run_date: $json.__run_date, title: e.title, meta_description: e.meta_description, robots: e.robots, canonical: e.canonical, http_status: e.http_status, indexable: e.indexable, raw: e.raw }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "any-events",
+      "name": "Any Events?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "any-events-cond",
+              "leftValue": "={{ ($json.__events || []).length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "write-events",
+      "name": "Write Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2860,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_monitor_events?on_conflict=tenant,event_id,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__events || []).map((e) => ({ tenant: $json.__tenant, url: e.url, event_id: e.event_id, change_class: e.change_class, severity: e.severity, before: e.before, after: e.after, run_date: $json.__run_date, notified: (($json.__max_severity_rank || 0) >= 4) }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "skip-events",
+      "name": "Skip Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    },
+    {
+      "id": "alert",
+      "name": "Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "alert-cond",
+              "leftValue": "={{ ($json.__max_severity_rank || 0) >= 4 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst RANK = {\"critical\":5,\"high\":4,\"medium\":3,\"low\":2,\"info\":1};\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const events = Array.isArray(j.__events) ? j.__events : [];\n  const factsOk = j.__facts_ok === true;\n  const failed = Array.isArray(j.__scrape_reasons) ? j.__scrape_reasons.length : 0;\n  const bySev = {};\n  for (const e of events) { bySev[e.severity] = (bySev[e.severity] || 0) + 1; }\n  const sevLine = ['critical', 'high', 'medium', 'low', 'info'].map((s) => (bySev[s] ? bySev[s] + ' ' + s : null)).filter(Boolean).join(', ') || 'no changes';\n  const top = events.slice().sort((a, b) => (RANK[b.severity] || 0) - (RANK[a.severity] || 0))[0];\n  const topLine = top ? (top.url + ' — ' + top.change_class + ' (' + top.severity + '): ' + String(top.before).slice(0, 80) + ' → ' + String(top.after).slice(0, 80)) : 'none';\n  const caveat = failed ? (' ' + failed + ' URL(s) could not be scraped this run — not diffed.') : '';\n  const notFacts = factsOk ? '' : (' No pages were readable this run (' + (j.__facts_reason || 'unknown') + ').');\n  const message = '🚨 SEO monitor — ' + events.length + ' change(s) (' + sevLine + '). Most severe: ' + topLine + '.' + caveat + notFacts;\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'seo_monitor',\n    tenant: j.__tenant || null,\n    run_date: j.__run_date || null,\n    facts_ok: factsOk,\n    event_count: events.length,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3520,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "quiet",
+      "name": "Quiet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    }
+  ],
+  "connections": {
+    "Every Day": {
+      "main": [
+        [
+          {
+            "node": "Confirm Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Config": {
+      "main": [
+        [
+          {
+            "node": "Spend Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Read": {
+      "main": [
+        [
+          {
+            "node": "Spend Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Gate": {
+      "main": [
+        [
+          {
+            "node": "Crawl?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crawl?": {
+      "main": [
+        [
+          {
+            "node": "Fan URLs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Crawl",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fan URLs": {
+      "main": [
+        [
+          {
+            "node": "Firecrawl Scrape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firecrawl Scrape": {
+      "main": [
+        [
+          {
+            "node": "Extract Elements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Elements": {
+      "main": [
+        [
+          {
+            "node": "Collect Current",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Crawl": {
+      "main": [
+        [
+          {
+            "node": "Collect Current",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Current": {
+      "main": [
+        [
+          {
+            "node": "Read Prior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Prior": {
+      "main": [
+        [
+          {
+            "node": "Diff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diff": {
+      "main": [
+        [
+          {
+            "node": "Write Snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Snapshots": {
+      "main": [
+        [
+          {
+            "node": "Any Events?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Events?": {
+      "main": [
+        [
+          {
+            "node": "Write Events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Events": {
+      "main": [
+        [
+          {
+            "node": "Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Events": {
+      "main": [
+        [
+          {
+            "node": "Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert?": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quiet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}

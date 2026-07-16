@@ -40,9 +40,12 @@ the `public` schema with no client values and no secrets. Every template is
 | [`templates/seo-rank-snapshots.sql`](templates/seo-rank-snapshots.sql) | (3) derived history | `tmpl_seo_rank_snapshots` — append point-in-time ranks (D-1) for the `[seo_improver_plugin]` rank tracker. Server-write-only. |
 | [`templates/seo-findings.sql`](templates/seo-findings.sql) | (1) app data | `tmpl_seo_findings` — stable-ID SEO opportunities ledger (D-2) for the `[seo_improver_plugin]` brick (`pr_url` null until Phase-2 fills it). Server-write-only. |
 | [`templates/seo-audit-runs.sql`](templates/seo-audit-runs.sql) | (1) app data | The `[seo_audit_orchestrator_plugin]` brick's isolated PAIR — `tmpl_seo_audit_runs` (one row per run, `child_status` honesty record) + `tmpl_seo_audit_queue` (one row per prioritized task, `merged_from` dedup trail). Server-write-only; no public read surface. |
+| [`templates/content-tracker.sql`](templates/content-tracker.sql) | (1) app data | `tmpl_seo_content_findings` — grounded content / on-page findings ledger for the `[content_tracker_plugin]` brick. Server-write-only; `on_conflict (tenant, finding_id, run_date)`; no public read surface. |
+| [`templates/competitor-gap.sql`](templates/competitor-gap.sql) | (1) app data | `tmpl_seo_competitor_gaps` — grounded competitor / SERP gaps ledger for the `[competitor_gap_plugin]` brick. Server-write-only; `on_conflict (tenant, finding_id, run_date)`; no public read surface. |
+| [`templates/seo-monitor.sql`](templates/seo-monitor.sql) | (3) derived history | The `[seo_monitor_plugin]` brick's isolated PAIR — `tmpl_seo_monitor_snapshots` (per-URL diff baseline) + `tmpl_seo_monitor_events` (classified change events). Append point-in-time history; server-write-only; no public read surface. |
 
-Eleven templates create **thirteen tables** (`child-owned-via-parent` and
-`seo-audit-runs` each create two).
+Fourteen templates create **seventeen tables** (`child-owned-via-parent`,
+`seo-audit-runs` and `seo-monitor` each create two).
 
 ## Conventions baked into every template
 

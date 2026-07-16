@@ -46,6 +46,9 @@ the freshness check makes it safe.
 | [`technical-audit/`](technical-audit/) | `[technical_audit_plugin]` | BASE | built |
 | [`seo-improver/`](seo-improver/) | `[seo_improver_plugin]` / `[seo_pr_apply]` | BASE | built (Phase-1 rank tracker; `[seo_pr_apply]` in `planned[]`) |
 | [`seo-audit-orchestrator/`](seo-audit-orchestrator/) | `[seo_audit_orchestrator_plugin]` | BASE | built (SEO-suite goal endpoint) |
+| [`content-tracker/`](content-tracker/) | `[content_tracker_plugin]` | BASE | built (SEO-suite; on-page content, new-site-friendly) |
+| [`competitor-gap/`](competitor-gap/) | `[competitor_gap_plugin]` | BASE | built (SEO-suite; competitor/SERP gaps) |
+| [`seo-monitor/`](seo-monitor/) | `[seo_monitor_plugin]` | BASE | built (SEO-suite; change/regression alerts) |
 
 *Tessera is a full-stack project, not a `[*_plugin]` brick, and is intentionally
 excluded from `bricks/`.*
