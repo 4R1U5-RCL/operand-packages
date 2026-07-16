@@ -1,0 +1,10 @@
+{
+  "brick": "sms-lead-qualifier",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/sms-state-machine.json": "be9d0f5b4840ec7c7d1c26b626bf55de711919cdaa4d65aa74536ede6765f848",
+    "n8n/workflows/signed-webhook-base.json": "16dba045dcdd64a9b7c36cd4ad5963332dfd11cbe1683d2f331fe8696af15b79",
+    "Webapp/n8n-trigger": "2534e5b3e1d293f397b72f346b12a613c52281ae0cdc277b3bb216dd21277c9a",
+    "supabase/templates/per-user-owned.sql": "d252f6eec81c710ce8399b65d65b6f4fe8725d57b0e9b8d45e9c9a3cd3473e8f"
+  }
+}

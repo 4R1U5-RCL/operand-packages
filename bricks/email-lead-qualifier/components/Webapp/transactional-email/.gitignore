@@ -1,0 +1,6 @@
+# local secrets — never commit. The seam reads the send-only Resend key + sender
+# from env or ~/.claude/transactional-email.env, never from anything in this package.
+transactional-email.env
+*.env
+!*.env.example
+*.local

@@ -11,5 +11,8 @@ __pycache__/
 node_modules/
 
 # Audit runtime artifacts — reports are generated, not versioned.
-audit/**/*.report.json
-audit/.runtime/
+# (audit now lives under components/Claude/audit/ after the components/ restructure;
+#  de-anchored so runtime artifacts stay ignored wherever a copy of audit lands —
+#  including assembled brick mirrors under bricks/*/components/.)
+**/audit/**/*.report.json
+**/audit/.runtime/

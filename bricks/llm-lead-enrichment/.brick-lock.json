@@ -1,0 +1,11 @@
+{
+  "brick": "llm-lead-enrichment",
+  "generatedBy": "scripts/assemble-bricks.mjs",
+  "components": {
+    "n8n/workflows/llm-doc-pipeline-mono.json": "f4264450b18aa5089155c74687ea52162567f5d922f990158b94175ab2630607",
+    "n8n/workflows/orchestrator-routing.json": "dac97d28fb17fa7d631829be78cce36f332d935c67bbf34e5a76fa31d4c395b2",
+    "n8n/workflows/outbound-verdict-callback.json": "9666eeb6b5c500a80b711ffb12a3a8238dcdd6e724b5bdaa909d99a610e43fef",
+    "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
+    "supabase/templates/derived-history.sql": "b6973070e068838df5db6d9da8309115e7ca0025430170a9dccf15d63cf14cc2"
+  }
+}

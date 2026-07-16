@@ -1,7 +1,8 @@
 # n8n — hosted workflow templates
 
 Reusable n8n workflow **templates** for the studio's own hosted instance — a
-top-level sibling of [`Claude/`](../Claude/) and [`Webapp/`](../Webapp/). Each
+layer under `components/`, sibling to [`Claude/`](../Claude/) and
+[`Webapp/`](../Webapp/). Each
 template is a node-graph pattern distilled from the workflows we actually run
 (`[STUDIO_TESSERA]`, `[STUDIO_NOTIFICATIONS]`, `[TESSERA]`, `[MOSAIC]`,
 `[SCARLET]`) — built once to be the starting point and reference shape for future

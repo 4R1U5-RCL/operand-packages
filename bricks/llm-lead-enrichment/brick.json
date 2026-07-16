@@ -1,0 +1,15 @@
+{
+  "name": "llm-lead-enrichment",
+  "plugin": "[llmenri_plugin]",
+  "title": "LLM lead enrichment",
+  "kind": "ADD-ON",
+  "portfolio": "https://operandstudio.com/portfolio/llm-lead-enrichment",
+  "components": [
+    "n8n/workflows/llm-doc-pipeline-mono.json",
+    "n8n/workflows/orchestrator-routing.json",
+    "n8n/workflows/outbound-verdict-callback.json",
+    "Webapp/spend-gate",
+    "supabase/templates/derived-history.sql"
+  ],
+  "planned": []
+}

@@ -1,0 +1,18 @@
+{
+  "name": "community-lead-radar",
+  "plugin": "[dirnotif_plugin]",
+  "title": "Community lead radar",
+  "kind": "BASE",
+  "portfolio": "https://operandstudio.com/portfolio/community-lead-radar",
+  "components": [
+    "n8n/workflows/schedule-dispatcher.json",
+    "n8n/workflows/read-only-json-api.json",
+    "n8n/workflows/llm-doc-pipeline-mono.json",
+    "n8n/workflows/notification-fanout.json",
+    "n8n/workflows/email-report.json",
+    "Webapp/spend-gate",
+    "supabase/templates/public-capture.sql",
+    "supabase/templates/derived-history.sql"
+  ],
+  "planned": []
+}

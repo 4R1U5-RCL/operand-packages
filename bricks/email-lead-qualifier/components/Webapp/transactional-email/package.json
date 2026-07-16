@@ -1,0 +1,19 @@
+{
+  "name": "@studio/transactional-email",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reusable transactional-email send seam. sendEmail(to, subject, html, {attachment}) validates the recipient server-side, builds a Resend payload (optional base64 attachment), and POSTs to the Resend REST API — fail-soft (returns a result, never throws). Backs both the in-app 'email me the report' action and the hosted 'email on done' n8n workflow node. Node-22 built-ins only; no SDK vendored; config via env (+ ~/.claude/transactional-email.env fallback); no secrets in files.",
+  "exports": {
+    ".": "./src/send.mjs",
+    "./send": "./src/send.mjs",
+    "./validate": "./src/validate.mjs"
+  },
+  "scripts": {
+    "selftest": "node selftest.mjs"
+  },
+  "files": [
+    "src",
+    "docs"
+  ]
+}
