@@ -2,7 +2,7 @@
   "brick": "keyword-research",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/keyword-research.json": "caf79053ea1a182e17e807ab810c45512a8176e89c66eb935979574f33e9fa2f",
+    "n8n/workflows/keyword-research.json": "0185212adc8d5e9b35875f13b3d252a66230afef490bc925145dc204d8145ee3",
     "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
     "supabase/templates/keyword-research.sql": "2c307c53e1dccc8cf7710d5d206b157a496dfb8a87d7725f8b0bde6fc8ee8989"
   }

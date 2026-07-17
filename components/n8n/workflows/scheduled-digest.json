@@ -1,0 +1,727 @@
+{
+  "name": "[TEMPLATE] [scheduled_digest] Scheduled Digest — read → summarize → deliver → log",
+  "nodes": [
+    {
+      "id": "every-period",
+      "name": "Every Period",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "compute-period",
+      "name": "Compute Period",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// client_id is bound from config (never runtime-trusted). FAIL-CLOSED on an\n// unresolved tenant (R-2): a null client_id can never key the dedup UNIQUE index.\nlet clientId = null;\ntry { clientId = ($vars.SCHEDULED_DIGEST_CLIENT_ID); } catch (e) { clientId = null; }\nclientId = (clientId === null || clientId === undefined || String(clientId).trim() === '') ? null : String(clientId).trim();\nconst tenantOk = clientId !== null;\nconst DAY = 86400000;\nconst now = Date.now();\n// UTC day-aligned window ending at the start of today.\nconst endMs = new Date(new Date(now).setUTCHours(0, 0, 0, 0)).getTime();\nconst startMs = endMs - 1 * DAY;\nconst priorStartMs = startMs - 1 * DAY;\nconst iso = (ms) => new Date(ms).toISOString();\nconst periodStart = iso(startMs);\nconst periodEnd = iso(endMs);\n// period_key is derived by the ENGINE from the grain (R-3), never the caller. A\n// date-grain key ('YYYY-MM-DD') and a window-grain key ('…|…') are provably\n// disjoint, so two consumers of DIFFERENT grains never collide on this shared log.\nconst periodKey = periodStart.slice(0, 10);\nreturn [{ json: {\n  __client_id: clientId,\n  __tenant_ok: tenantOk,\n  __period_start: periodStart,\n  __period_end: periodEnd,\n  __prior_start: iso(priorStartMs),\n  __prior_end: periodStart,\n  __period_key: periodKey,\n} }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-log",
+      "name": "Read Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_scheduled_digest_log?select=id&status=eq.sent&client_id=eq.{{ encodeURIComponent($json.__client_id) }}&period_key=eq.{{ encodeURIComponent($json.__period_key) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "dedup-guard",
+      "name": "Dedup Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compute Period').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const alreadySent = rows.length > 0;\n  out.push({ json: Object.assign({}, c, {\n    __already_sent: alreadySent,\n    __fresh: c.__tenant_ok === true && !alreadySent,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "fresh-period",
+      "name": "Fresh Period?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fresh-period-cond",
+              "leftValue": "={{ $json.__fresh === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stop-duplicate",
+      "name": "Stop Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        220
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    },
+    {
+      "id": "reserve-period",
+      "name": "Reserve Period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_scheduled_digest_log?on_conflict=client_id,period_key",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ client_id: $json.__client_id, period_key: $json.__period_key, period_start: $json.__period_start, period_end: $json.__period_end, status: 'pending' }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "reserve-guard",
+      "name": "Reserve Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Dedup Guard').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const status = Number(resp.statusCode || 0);\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  // A 2xx with at least one returned row = we won the reservation. A 2xx with 0\n  // rows = the on_conflict ignore fired (someone else holds this period) → stop.\n  const won = status >= 200 && status < 300 && rows.length > 0;\n  out.push({ json: Object.assign({}, c, { __reserved: won }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "won-reservation",
+      "name": "Won Reservation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "won-reservation-cond",
+              "leftValue": "={{ $json.__reserved === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stop-reserved",
+      "name": "Stop Reserved",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        220
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    },
+    {
+      "id": "read-source",
+      "name": "Read Source",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        -80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_digest_source?select=*&created_at=gte.{{ encodeURIComponent($json.__period_start) }}&created_at=lt.{{ encodeURIComponent($json.__period_end) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "extract-facts",
+      "name": "Extract Facts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compute Period').all();\nconst items = $input.all();\n// The caller's fact-extraction fragment — returns { sourceFacts, factsOk?, reason? }\n// FROM the parsed rows. It owns extraction/shape ONLY; the engine owns the verdict.\nconst extractFrag = (rows, c) => { const items = Array.isArray(rows) ? rows.filter((r) => r && typeof r === 'object') : [];\nreturn { sourceFacts: { count: items.length, items: items.slice(0, 50) }, factsOk: items.length > 0 }; };\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const it = items[i];\n  const resp = it.json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode == null ? 200 : resp.statusCode);\n  let rows = (function(){ const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body); if (Array.isArray(parsed)) return parsed; return parsed ? [parsed] : []; })();\n  let factsOk = false;\n  let reason = null;\n  let sourceFacts = {};\n  if (status < 200 || status >= 300) {\n    reason = 'source_error_' + (status || 'unknown');\n  } else if (!Array.isArray(rows)) {\n    reason = 'source_unparseable';\n  } else if (rows.length === 0) {\n    reason = 'source_empty';\n  } else {\n    let frag = null;\n    try { frag = extractFrag(rows, c); } catch (e) { frag = null; }\n    if (frag && typeof frag === 'object' && frag.sourceFacts && typeof frag.sourceFacts === 'object') {\n      sourceFacts = frag.sourceFacts;\n      // The caller may signal 'no usable rows' via factsOk:false; the ENGINE still\n      // owns the final verdict (an error/empty always wins). No fabricated values.\n      factsOk = frag.factsOk === false ? false : true;\n      if (!factsOk) reason = frag.reason || 'source_no_usable_rows';\n    } else {\n      reason = 'source_unparseable';\n    }\n  }\n  // Always attach the window as grounding evidence.\n  sourceFacts = Object.assign({}, sourceFacts, {\n    window: { start: c.__period_start, end: c.__period_end, prior_start: c.__prior_start, prior_end: c.__prior_end },\n  });\n  out.push({ json: Object.assign({}, c, {\n    __facts_ok: factsOk,\n    __facts_reason: reason,\n    __source_facts: sourceFacts,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "summary",
+      "name": "Summary?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "summary-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($vars.SCHEDULED_DIGEST_SUMMARY_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "attach-summary",
+      "name": "Attach Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Extract Facts').all().filter((it) => it.json && it.json.__facts_ok === true);\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(p.body);\n  const envelope = (parsed && typeof parsed === 'object') ? parsed : p;\n  let summary = null;\n  // Child form: a partial with a plain-string summary field.\n  const cand = envelope.summary || envelope.reply_draft || envelope.rationale;\n  if (typeof cand === 'string' && cand.trim()) summary = cand.trim().slice(0, 400);\n  // Inline openRouter form: choices[0].message.content.\n  if (!summary) {\n    const content = envelope.choices && envelope.choices[0] && envelope.choices[0].message\n      && envelope.choices[0].message.content;\n    if (typeof content === 'string' && content.trim()) summary = content.trim().slice(0, 400);\n  }\n  out.push({ json: Object.assign({}, c, { __summary: summary }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-summary",
+      "name": "Skip Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: Object.assign({}, it.json, { __summary: null }) }));"
+      }
+    },
+    {
+      "id": "compose-digest",
+      "name": "Compose Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\n// The caller's render fragment — turns facts into a digest string. Grounding is the\n// ENGINE's: this only renders what Extract Facts already grounded.\nconst composeFrag = (facts, ctx) => { const n = (facts && typeof facts.count === 'number') ? facts.count : 0;\nreturn 'Digest for ' + String(ctx.__period_start || '').slice(0, 10)\n  + '\\n\\n' + n + ' item' + (n === 1 ? '' : 's') + ' recorded this period.'; };\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const facts = j.__source_facts || {};\n  let body;\n  let status;\n  let subjectOverride = null;\n  if (j.__facts_ok === true) {\n    status = 'sent';\n    let rendered = null;\n    try { rendered = composeFrag(facts, j); } catch (e) { rendered = null; }\n    // The fragment may return a string body OR { body, subject } to shape the subject.\n    if (rendered && typeof rendered === 'object' && typeof rendered.body === 'string') {\n      body = rendered.body.trim() ? rendered.body : 'Activity was recorded for this period.';\n      if (typeof rendered.subject === 'string' && rendered.subject.trim()) subjectOverride = rendered.subject.trim();\n    } else {\n      body = (typeof rendered === 'string' && rendered.trim()) ? rendered : 'Activity was recorded for this period.';\n    }\n  } else {\n    // HONEST FAILURE (engine-owned): the source returned nothing usable — say so,\n    // invent nothing. status no_data unless the reason is an error.\n    status = (j.__facts_reason && String(j.__facts_reason).indexOf('error') !== -1) ? 'error' : 'no_data';\n    const why = j.__facts_reason ? (' (' + j.__facts_reason + ')') : '';\n    body = 'No activity could be reported for this period' + why\n      + '. No figures are shown because none were returned from the source.';\n  }\n  const summary = j.__summary ? (j.__summary + '\\n\\n') : '';\n  const subject = subjectOverride || ('Digest — ' + String(j.__period_start || '').slice(0, 10));\n  out.push({ json: Object.assign({}, j, {\n    __digest: summary + body,\n    __subject: subject,\n    __status: status,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "stamp-sent",
+      "name": "Stamp Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compose Digest').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const delivered = status >= 200 && status < 300;\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  const messageId = (parsed && (parsed.id || parsed.message_id)) || null;\n  const sentAt = (delivered && c.__status === 'sent') ? new Date().toISOString() : null;\n  out.push({ json: Object.assign({}, c, { __sent_at: sentAt, __message_id: messageId }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "log-digest",
+      "name": "Log Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3740,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_scheduled_digest_log?on_conflict=client_id,period_key",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ client_id: $json.__client_id, period_key: $json.__period_key, period_start: $json.__period_start, period_end: $json.__period_end, sent_at: $json.__sent_at, status: $json.__status, digest_summary: $json.__digest, source_facts: $json.__source_facts, message_id: $json.__message_id }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "summarize",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2420,
+        -160
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.SCHEDULED_DIGEST_SUMMARY_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const payload = {\n    message: \"📊 \" + String(j.__digest || '').slice(0, 3500),\n    kind: \"scheduled_digest\",\n    client_id: j.__client_id || null,\n    status: j.__status || null,\n    period_start: j.__period_start || null,\n    period_end: j.__period_end || null,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-owner",
+      "name": "Notify Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3300,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Every Period": {
+      "main": [
+        [
+          {
+            "node": "Compute Period",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Period": {
+      "main": [
+        [
+          {
+            "node": "Read Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Log": {
+      "main": [
+        [
+          {
+            "node": "Dedup Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup Guard": {
+      "main": [
+        [
+          {
+            "node": "Fresh Period?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fresh Period?": {
+      "main": [
+        [
+          {
+            "node": "Reserve Period",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserve Period": {
+      "main": [
+        [
+          {
+            "node": "Reserve Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserve Guard": {
+      "main": [
+        [
+          {
+            "node": "Won Reservation?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Won Reservation?": {
+      "main": [
+        [
+          {
+            "node": "Read Source",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop Reserved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Source": {
+      "main": [
+        [
+          {
+            "node": "Extract Facts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Facts": {
+      "main": [
+        [
+          {
+            "node": "Summary?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary?": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Attach Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Summary": {
+      "main": [
+        [
+          {
+            "node": "Compose Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Summary": {
+      "main": [
+        [
+          {
+            "node": "Compose Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Digest": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Owner": {
+      "main": [
+        [
+          {
+            "node": "Stamp Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp Sent": {
+      "main": [
+        [
+          {
+            "node": "Log Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}

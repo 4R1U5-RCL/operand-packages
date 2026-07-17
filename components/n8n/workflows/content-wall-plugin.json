@@ -1,0 +1,596 @@
+{
+  "name": "[TEMPLATE] [content_wall_plugin] Content Wall Collect → Moderate → Publish",
+  "nodes": [
+    {
+      "id": "inbound-webhook",
+      "name": "Inbound Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-wall-intake",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "verify-hmac",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst MAX_SKEW_MS = 300000;\nconst SIG_HEADER = \"x-n8n-signature\";\nconst TS_HEADER = \"x-n8n-timestamp\";\nconst STATIC_HEADER = \"x-static-token\";\nconst hmac = (d) => crypto.createHmac('sha256', SECRET).update(d).digest('hex');\nconst safeEq = (aHex, bHex) => {\n  if (!aHex || !bHex) return false;\n  const a = Buffer.from(String(aHex)), b = Buffer.from(String(bHex));\n  return a.length === b.length && crypto.timingSafeEqual(a, b);\n};\n// TE-16: recover the EXACT signed bytes — rawBody when n8n captured it, else a\n// careful re-stringify of the parsed body (must round-trip byte-identical).\nconst rawOf = (j) => (j.rawBody != null) ? j.rawBody.toString() : JSON.stringify(j.body);\n\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const headers = j.headers || {};\n  const raw = rawOf(j);\n  let ok = false;\n  // Fail-closed: an unconfigured secret can never verify (and never throws).\n  if (SECRET) {\n  const sig = headers[SIG_HEADER];\n  const ts = headers[TS_HEADER];\n  if (ts) {\n    // timestamp PRESENT -> studio form: replay-guarded HMAC(`${ts}.${body}`).\n    const n = Number(ts);\n    if (sig && Number.isFinite(n) && Math.abs(Date.now() - n) <= MAX_SKEW_MS) {\n      ok = safeEq(hmac(ts + '.' + raw), sig);\n    }\n  } else {\n    // timestamp ABSENT -> harness verify-n8n form: bare-body HMAC(`${body}`),\n    // only the signature header present.\n    ok = safeEq(hmac(raw), sig);\n  }\n  }\n  // n8n Cloud freezes Code-node input items (IN-25): in-place mutations are\n  // silently dropped — always RETURN new items.\n  const item = { json: Object.assign({}, j, { __authok: ok }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "auth-gate",
+      "name": "Auth Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "auth-gate-cond",
+              "leftValue": "={{ $json.__authok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "reject-401",
+      "name": "Reject 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        220
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"invalid or missing signature\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "sign-ack",
+      "name": "Sign Ack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const requestId = (j.body && j.body.request_id) || j.request_id || null;\n  const body = { ok: true, request_id: requestId };\n  const payload = JSON.stringify(body);\n  // n8n Cloud freezes Code-node input items (IN-25): in-place writes are silently\n  // dropped, so the respond node would read an item WITHOUT __sig and answer\n  // unsigned. Always RETURN a NEW item carrying the signing fields (and binary).\n  // Fail-open to UNSIGNED when the secret is unreachable — empty __sig rather than\n  // throw or sign with an empty key.\n  const item = { json: Object.assign({}, j, {\n    __body: body,\n    __ts: String(Date.now()),\n    __sig: SECRET ? crypto.createHmac('sha256', SECRET).update(payload).digest('hex') : '',\n  }) };\n  if (it.binary) item.binary = it.binary;\n  out.push(item);\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ack-202",
+      "name": "Ack 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        -200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.__body }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "x-n8n-signature",
+                "value": "={{ $json.__sig }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "normalize-submission",
+      "name": "Normalize Submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const CONTENT_TYPE = \"testimonial\";\nconst items = $input.all();\nconst out = [];\nconst s = (v) => { if (v === null || v === undefined) return null; const t = String(v).trim(); return t || null; };\nconst n = (v) => { const x = Number(v); return Number.isFinite(x) ? Math.max(1, Math.min(5, Math.round(x))) : null; };\nfor (const it of items) {\n  const b = (it.json && it.json.body && typeof it.json.body === 'object') ? it.json.body : (it.json || {});\n  out.push({ json: Object.assign({}, it.json, { __row: {\n    request_id: s(b.request_id),\n    client_id: s(b.client_id),\n    content_type: CONTENT_TYPE,\n    submitter_name: s(b.submitter_name || b.name),\n    body: s(b.body || b.text || b.message || b.testimonial_text),\n    rating: CONTENT_TYPE === 'review' ? n(b.rating) : null,\n    question: CONTENT_TYPE === 'qa' ? s(b.question || b.body) : null,\n    source_page: s(b.source_page || b.page),\n    consent_at: s(b.consent_at) || new Date().toISOString(),\n  } }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "insert-pending",
+      "name": "Insert Pending",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_content_wall?on_conflict=request_id",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ request_id: $json.__row.request_id, client_id: $json.__row.client_id, content_type: $json.__row.content_type, submitter_name: $json.__row.submitter_name, body: $json.__row.body, rating: $json.__row.rating, question: $json.__row.question, source_page: $json.__row.source_page, consent_at: $json.__row.consent_at, status: \"pending\", is_approved: false, is_featured: false }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "new-row",
+      "name": "New Row?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Normalize Submission').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const row = rows[0] || null;\n  out.push({ json: Object.assign({}, c, {\n    __is_new: !!row,\n    __row_id: row && row.id != null ? row.id : null,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "proceed",
+      "name": "Proceed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "proceed-cond",
+              "leftValue": "={{ $json.__is_new === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "moderation-bound",
+      "name": "Moderation Bound?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "moderation-bound-cond",
+              "leftValue": "={{ (($vars.CONTENT_WALL_MODERATION_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "moderate",
+      "name": "Moderate",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1980,
+        -80
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.CONTENT_WALL_MODERATION_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "merge-moderation",
+      "name": "Merge Moderation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const SENTS = ['pos', 'neu', 'neg'];\nconst ctx = $('New Row?').all().filter((it) => it.json && it.json.__is_new === true);\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  let score = Number(p.moderation_score);\n  score = Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : null;\n  out.push({ json: Object.assign({}, c, {\n    __moderation_score: score,\n    __themes: Array.isArray(p.themes) ? p.themes.slice(0, 12) : null,\n    __sentiment: SENTS.includes(p.sentiment) ? p.sentiment : null,\n    __flags: Array.isArray(p.flags) ? p.flags.slice(0, 12) : null,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-moderation",
+      "name": "Skip Moderation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: Object.assign({}, it.json, { __moderation_score: null, __themes: null, __sentiment: null, __flags: null }) }));"
+      }
+    },
+    {
+      "id": "update-row",
+      "name": "Update Row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        40
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_content_wall?id=eq.{{ encodeURIComponent($json.__row_id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"needs_review\", moderation_score: $json.__moderation_score, themes: $json.__themes, sentiment: $json.__sentiment, flags: $json.__flags }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst MAX = 200;\nconst CONTENT_TYPE = \"testimonial\";\nconst NK = {\"kind\":\"testimonial_pending\",\"emoji\":\"📝\",\"label\":\"TESTIMONIAL\"};\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const r = j.__row || {};\n  const raw = (CONTENT_TYPE === 'qa') ? (r.question || r.body || '') : (r.body || '');\n  const excerpt = String(raw).replace(/\\s+/g, ' ').trim().slice(0, MAX);\n  const ratingStr = (CONTENT_TYPE === 'review' && r.rating != null) ? (' [' + r.rating + '\\u2605]') : '';\n  const payload = {\n    message: NK.emoji + ' ' + NK.label + ' (pending review) from ' + (r.submitter_name || 'anonymous')\n      + ratingStr + (excerpt ? ': ' + excerpt : ''),\n    kind: NK.kind,\n    content_type: CONTENT_TYPE,\n    content_wall_id: j.__row_id != null ? j.__row_id : null,\n    submitter_name: r.submitter_name || null,\n    rating: (CONTENT_TYPE === 'review') ? (r.rating != null ? r.rating : null) : null,\n    source_page: r.source_page || null,\n    excerpt: excerpt || null,\n    moderation_score: j.__moderation_score,\n    sentiment: j.__sentiment,\n    flags: j.__flags,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-owner",
+      "name": "Notify Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2860,
+        40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Inbound Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC": {
+      "main": [
+        [
+          {
+            "node": "Auth Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Gate": {
+      "main": [
+        [
+          {
+            "node": "Sign Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Ack": {
+      "main": [
+        [
+          {
+            "node": "Ack 202",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Normalize Submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Submission": {
+      "main": [
+        [
+          {
+            "node": "Insert Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Pending": {
+      "main": [
+        [
+          {
+            "node": "New Row?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Row?": {
+      "main": [
+        [
+          {
+            "node": "Proceed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proceed?": {
+      "main": [
+        [
+          {
+            "node": "Moderation Bound?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Moderation Bound?": {
+      "main": [
+        [
+          {
+            "node": "Moderate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Moderation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Moderate": {
+      "main": [
+        [
+          {
+            "node": "Merge Moderation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Moderation": {
+      "main": [
+        [
+          {
+            "node": "Update Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Moderation": {
+      "main": [
+        [
+          {
+            "node": "Update Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Row": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

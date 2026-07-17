@@ -352,6 +352,192 @@
       "alwaysOutputData": true
     },
     {
+      "id": "meter-spend",
+      "name": "Meter Spend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        -320
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (items[i] && items[i].json) || {};\n  \n  \n  let delta = 0;\nfor (const __ref of [\"Term Metrics\"]) {\n  let __resp = {};\n  try { const __r = $(__ref).all(); __resp = (__r[i] || __r[0] || { json: {} }).json || {}; } catch (__e) { __resp = {}; }\n  const __parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(__resp.body);\n  if (__parsed && typeof __parsed === 'object') {\n    if (Number.isFinite(Number(__parsed.cost))) { delta += Number(__parsed.cost); }\n    else if (Array.isArray(__parsed.tasks)) { delta += __parsed.tasks.reduce((s, t) => s + (Number.isFinite(Number(t && t.cost)) ? Number(t.cost) : 0), 0); }\n  }\n}\n  if (!Number.isFinite(delta) || delta < 0) delta = 0;\n  out.push({ json: Object.assign({}, c, { [\"__spend_delta\"]: delta }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "real-spend",
+      "name": "Real Spend?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        -420
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "real-spend-cond",
+              "leftValue": "={{ (Number($json.__spend_delta) || 0) > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "spend-increment",
+      "name": "Spend Increment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2760,
+        -520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/rpc/incr_send_quota",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_window_start: new Date().toISOString().slice(0,10), p_channel: \"dataforseo\", p_sender_id: \"dataforseo-daily\", p_count: 1, p_spend_usd: (Number($json.__spend_delta) || 0) }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "meter-spend-firecrawl",
+      "name": "Meter Spend (Firecrawl)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        -320
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\n\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (items[i] && items[i].json) || {};\n  \n  if (!c[\"__scrape_ok\"]) { out.push({ json: Object.assign({}, c, { [\"__spend_delta_firecrawl\"]: 0 }) }); continue; }\n  let delta = Number(readSecret(\"FIRECRAWL_USD_PER_CALL\"));\nif (!Number.isFinite(delta)) delta = 0.01;\n  if (!Number.isFinite(delta) || delta < 0) delta = 0;\n  out.push({ json: Object.assign({}, c, { [\"__spend_delta_firecrawl\"]: delta }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "real-spend-firecrawl",
+      "name": "Real Spend? (Firecrawl)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        -420
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "real-spend-firecrawl-cond",
+              "leftValue": "={{ (Number($json.__spend_delta_firecrawl) || 0) > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "spend-increment-firecrawl",
+      "name": "Spend Increment (Firecrawl)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2100,
+        -520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/rpc/incr_send_quota",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_window_start: new Date().toISOString().slice(0,10), p_channel: \"firecrawl\", p_sender_id: \"firecrawl-daily\", p_count: 1, p_spend_usd: (Number($json.__spend_delta_firecrawl) || 0) }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
       "id": "assess-content",
       "name": "Assess Content",
       "type": "n8n-nodes-base.code",
@@ -386,7 +572,7 @@
           "conditions": [
             {
               "id": "recommend-cond",
-              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_CONTENT_GAP_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "leftValue": "={{ $json.__facts_ok === true && (($vars.SEO_CONTENT_GAP_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
               "rightValue": "",
               "operator": {
                 "type": "boolean",
@@ -412,7 +598,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_CONTENT_GAP_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_CONTENT_GAP_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -517,7 +703,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
         "options": {
           "response": {
             "response": {
@@ -662,6 +848,46 @@
       "main": [
         [
           {
+            "node": "Meter Spend (Firecrawl)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meter Spend (Firecrawl)": {
+      "main": [
+        [
+          {
+            "node": "Real Spend? (Firecrawl)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Real Spend? (Firecrawl)": {
+      "main": [
+        [
+          {
+            "node": "Spend Increment (Firecrawl)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Terms?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Increment (Firecrawl)": {
+      "main": [
+        [
+          {
             "node": "Terms?",
             "type": "main",
             "index": 0
@@ -699,6 +925,46 @@
       ]
     },
     "Merge Metrics": {
+      "main": [
+        [
+          {
+            "node": "Meter Spend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meter Spend": {
+      "main": [
+        [
+          {
+            "node": "Real Spend?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Real Spend?": {
+      "main": [
+        [
+          {
+            "node": "Spend Increment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Assess Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Increment": {
       "main": [
         [
           {

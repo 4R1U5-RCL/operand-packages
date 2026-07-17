@@ -150,7 +150,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_KEYWORD_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_KEYWORD_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -170,7 +170,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_TECHNICAL_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_TECHNICAL_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -190,7 +190,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_RANK_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_RANK_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -210,7 +210,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_CONTENT_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_CONTENT_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -230,7 +230,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_COMPETITOR_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_COMPETITOR_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -250,7 +250,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_MONITOR_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_MONITOR_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -270,7 +270,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_BACKLINK_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_BACKLINK_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -290,7 +290,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_GSC_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_GSC_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -310,7 +310,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_CONTENT_GEN_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_CONTENT_GEN_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -670,7 +670,7 @@
           "conditions": [
             {
               "id": "summarize-cond",
-              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_AUDIT_SUMMARY_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "leftValue": "={{ $json.__facts_ok === true && (($vars.SEO_AUDIT_SUMMARY_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
               "rightValue": "",
               "operator": {
                 "type": "boolean",
@@ -696,7 +696,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_AUDIT_SUMMARY_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_AUDIT_SUMMARY_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -860,7 +860,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
         "options": {
           "response": {
             "response": {

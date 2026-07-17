@@ -2,7 +2,7 @@
   "brick": "competitor-gap",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/competitor-gap.json": "c66a0e54c917221270ab83f33b5de67f00e666eb8fb32246df9eefeab5eb303c",
+    "n8n/workflows/competitor-gap.json": "3467015a9c366c391efcdb6bf23a7bb4d1c0ef515f74aa8457605d66f1e27331",
     "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
     "supabase/templates/competitor-gap.sql": "d2336f5793b49ad0f8805bfc31350be9b0bd39eca87a3908a387f692cf89e69f"
   }

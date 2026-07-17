@@ -207,6 +207,99 @@
       "alwaysOutputData": true
     },
     {
+      "id": "meter-spend",
+      "name": "Meter Spend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        -320
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\n\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (items[i] && items[i].json) || {};\n  \n  if (!c[\"__element\"]) { out.push({ json: Object.assign({}, c, { [\"__spend_delta\"]: 0 }) }); continue; }\n  let delta = Number(readSecret(\"FIRECRAWL_USD_PER_CALL\"));\nif (!Number.isFinite(delta)) delta = 0.01;\n  if (!Number.isFinite(delta) || delta < 0) delta = 0;\n  out.push({ json: Object.assign({}, c, { [\"__spend_delta\"]: delta }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "real-spend",
+      "name": "Real Spend?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        -420
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "real-spend-cond",
+              "leftValue": "={{ (Number($json.__spend_delta) || 0) > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "spend-increment",
+      "name": "Spend Increment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1660,
+        -520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/rpc/incr_send_quota",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_window_start: new Date().toISOString().slice(0,10), p_channel: \"firecrawl\", p_sender_id: \"firecrawl-daily\", p_count: 1, p_spend_usd: (Number($json.__spend_delta) || 0) }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
       "id": "collect-current",
       "name": "Collect Current",
       "type": "n8n-nodes-base.code",
@@ -461,7 +554,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
         "options": {
           "response": {
             "response": {
@@ -595,6 +688,46 @@
       ]
     },
     "Extract Elements": {
+      "main": [
+        [
+          {
+            "node": "Meter Spend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meter Spend": {
+      "main": [
+        [
+          {
+            "node": "Real Spend?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Real Spend?": {
+      "main": [
+        [
+          {
+            "node": "Spend Increment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Collect Current",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Increment": {
       "main": [
         [
           {

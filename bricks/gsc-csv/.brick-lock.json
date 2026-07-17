@@ -2,7 +2,7 @@
   "brick": "gsc-csv",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/gsc-csv.json": "fb2983e9745030bcadf5155eb514d3479c7c5a4850c9f598ff356c18ef5db1ee",
+    "n8n/workflows/gsc-csv.json": "88355a7c850778b97a4a64c0c79710b5eeeca0ce3ac9fae101eaf61a71ca4d56",
     "supabase/templates/gsc-csv.sql": "79d1c1c6888a3391b002157283f4b9af28c7547e2c4ae9278c98d5520a178984"
   }
 }

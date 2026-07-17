@@ -2,7 +2,7 @@
   "brick": "seo-improver",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/seo-improver.json": "77463625cda5c26311bb20bffa59aa51eb1018b31a8d204f250d40c838eca4d1",
+    "n8n/workflows/seo-improver.json": "610485a40941686e7375fb8659974478d3ec9a14b1ec27823366e5093fa9413a",
     "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
     "supabase/templates/seo-rank-snapshots.sql": "56d72fc6c5c2b4db2453eb0c5285bc1fb916b514598e5e7432e8a9a708d30a37",
     "supabase/templates/seo-findings.sql": "c525af879ccdb5b227fa891876b44536f73ef5e3d517fac2ac6e5cfccbf6c23d"

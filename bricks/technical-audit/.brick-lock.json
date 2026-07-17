@@ -2,7 +2,7 @@
   "brick": "technical-audit",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/technical-audit.json": "7f61c0d7ecd3d8e678ccb78cd2db1bab87c8983afc5c53b6df821f5c277b5890",
+    "n8n/workflows/technical-audit.json": "f0cf12a621d6910f3d634e889f5905f87e8de7cd449db335f5731b1740cb7e0b",
     "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
     "supabase/templates/technical-audit.sql": "7033f52e13b7d6208cbfee0522316ea8b637ce758776e831689b172f45f088c6"
   }

@@ -290,7 +290,7 @@
           "conditions": [
             {
               "id": "draft-cond",
-              "leftValue": "={{ $json.__facts_ok === true && (($env.SEO_GSC_DRAFT_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "leftValue": "={{ $json.__facts_ok === true && (($vars.SEO_GSC_DRAFT_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
               "rightValue": "",
               "operator": {
                 "type": "boolean",
@@ -316,7 +316,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "={{ $env.SEO_GSC_DRAFT_WORKFLOW_ID || \"\" }}",
+          "value": "={{ $vars.SEO_GSC_DRAFT_WORKFLOW_ID || \"\" }}",
           "mode": "id"
         },
         "options": {}
@@ -377,7 +377,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.STUDIO_NOTIFY_FANOUT_URL }}",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
         "options": {
           "response": {
             "response": {
