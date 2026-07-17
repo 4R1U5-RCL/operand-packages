@@ -22,8 +22,13 @@
 // Two honesty rules:
 //   1. READS PASS THROUGH. A GET/HEAD fetch, or a read-only `gh`/`git` command, is
 //      delegated to the real implementation untouched — dry-run gathers freely.
-//   2. THE SANCTIONED NOTIFY CHANNEL IS NOT A GUARDED WRITE. A POST to an n8n
-//      WEBHOOK (…/webhook/…) is the notify seam, explicitly allowed (spec C1).
+//   2. THREE WRITE CLASSES ARE SANCTIONED (not guarded): (a) a POST to an n8n
+//      WEBHOOK (…/webhook/… — the notify seam, spec C1); (b) OPS BOOKKEEPING — a
+//      PostgREST data write to exactly /rest/v1/(tmpl_)?ops_task_queue|
+//      device_heartbeats (the queue-runner's own claim/status/heartbeat rows,
+//      studio-owned service-role-only ops state); (c) an LLM INFERENCE POST to the
+//      operator-configured LiteLLM proxy (LITELLM_PRIMARY_URL/FALLBACK_URL — an
+//      inference read that mutates no infra). Any other mutating verb is guarded.
 //
 // `deferGuardedWrite(action)` is the sanctioned way for the agent to REPRESENT a
 // guarded write it defers: it performs NO I/O — it returns a plan descriptor the
@@ -51,14 +56,49 @@ function isBlockError(err) {
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
+ * Ops-bookkeeping tables: the SECOND sanctioned non-guarded write channel (beside
+ * the notify webhook). The queue-runner's own state — claim/status/attempts rows
+ * on the ops task queue and its device_heartbeats liveness row — is STUDIO-OWNED
+ * ops data behind a service-role-only RLS wall, not client/prod infra. A PostgREST
+ * data write to exactly these tables is bookkeeping, not a guarded write.
+ * Deliberately a fixed allow-list (never a prefix or pattern the URL author
+ * controls); the Management-API /database/query path (prod DDL) does NOT match
+ * /rest/v1/ and stays guarded.
+ */
+const OPS_BOOKKEEPING_REST_RE = /\/rest\/v1\/(?:tmpl_)?(?:ops_task_queue|device_heartbeats)(?:[?/]|$)/;
+
+/**
+ * LLM inference: the THIRD sanctioned non-guarded channel. A chat-completion POST
+ * to the studio's LiteLLM proxy is an inference READ (align's cross-model gate,
+ * the /validate chain) — it mutates no infrastructure. Resolved from
+ * LITELLM_PRIMARY_URL/FALLBACK_URL by ENV REFERENCE at classification time — never
+ * a caller-supplied pattern — so only the proxy the operator configured is exempt;
+ * any other host's mutating verb stays guarded. Discovered the hard way: the
+ * runtime guard wrap blocked align's 8 gate POSTs on the first automatic run
+ * (2026-07-03 00:07) and correctly failed the row.
+ */
+function isLlmInferenceUrl(u) {
+  for (const name of ["LITELLM_PRIMARY_URL", "LITELLM_FALLBACK_URL"]) {
+    const base = process.env[name];
+    if (base && u.startsWith(base.toLowerCase().replace(/\/$/, "") + "/")) return true;
+  }
+  return false;
+}
+
+/**
  * Default fetch classifier: a MUTATING HTTP verb (POST/PUT/PATCH/DELETE) is a
  * guarded write UNLESS it targets an n8n WEBHOOK (…/webhook/… — the sanctioned
- * notify channel). A GET/HEAD/OPTIONS read is never guarded.
+ * notify channel), an OPS-BOOKKEEPING table (…/rest/v1/ops_task_queue|
+ * device_heartbeats — the queue-runner's studio-owned state rows), or the
+ * operator-configured LLM INFERENCE proxy (LITELLM_* env — inference is a read).
+ * A GET/HEAD/OPTIONS read is never guarded.
  */
 export function defaultIsGuardedFetch(info) {
   if (!WRITE_METHODS.has(String(info.method).toUpperCase())) return false;
   const u = String(info.url).toLowerCase();
   if (u.includes("/webhook/") || u.includes("/webhook-test/")) return false;
+  if (OPS_BOOKKEEPING_REST_RE.test(u)) return false;
+  if (isLlmInferenceUrl(u)) return false;
   return true;
 }
 
