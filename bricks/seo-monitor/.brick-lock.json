@@ -2,7 +2,7 @@
   "brick": "seo-monitor",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/seo-monitor.json": "adc4e26859f4385d2f50af6ea65af0a1009a02c6303fb65ab2593892b469564d",
+    "n8n/workflows/seo-monitor.json": "77e37cdce7ed00137d1cd951930aaedd02bb3d3a30977f1ff89838ac668ae57d",
     "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
     "supabase/templates/seo-monitor.sql": "93bc2cc9d3eb6019f6e48816a3ee4f109230ef15aa1b2c3620a7720925a482c3"
   }

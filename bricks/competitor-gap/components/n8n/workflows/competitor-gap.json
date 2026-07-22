@@ -248,7 +248,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/competitors_domain/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/dataforseo_labs/google/competitors_domain/live' }}",
         "options": {
           "response": {
             "response": {
@@ -271,12 +271,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify([{ target: $json.__domain, location_name: $json.__location, language_name: $json.__language, limit: 5, exclude_top_domains: true, order_by: ['intersections,desc'] }]) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -384,7 +384,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/domain_intersection/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/dataforseo_labs/google/domain_intersection/live' }}",
         "options": {
           "response": {
             "response": {
@@ -407,12 +407,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify(($json.__competitors || []).map((comp) => ({ target1: $json.__domain, target2: comp, location_name: $json.__location, language_name: $json.__language, intersections: false, item_types: ['organic'], limit: 200, order_by: ['keyword_data.keyword_info.search_volume,desc'] }))) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -525,6 +525,21 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "id": "restore-spend-ctx",
+      "name": "Restore Spend Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3200,
+        -460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Meter Spend\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
     },
     {
       "id": "prioritize",
@@ -976,6 +991,17 @@
       ]
     },
     "Spend Increment": {
+      "main": [
+        [
+          {
+            "node": "Restore Spend Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Spend Ctx": {
       "main": [
         [
           {

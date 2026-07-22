@@ -248,7 +248,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/backlinks/summary/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/backlinks/summary/live' }}",
         "options": {
           "response": {
             "response": {
@@ -271,12 +271,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify([{ target: $json.__domain, internal_list_limit: 10, backlinks_status_type: \"live\", include_subdomains: true }]) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -322,7 +322,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/backlinks/referring_domains/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/backlinks/referring_domains/live' }}",
         "options": {
           "response": {
             "response": {
@@ -345,12 +345,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify([{ target: $json.__domain, limit: 100, backlinks_status_type: \"live\", order_by: ['rank,desc'] }]) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -415,7 +415,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/backlinks/domain_intersection/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/backlinks/domain_intersection/live' }}",
         "options": {
           "response": {
             "response": {
@@ -438,12 +438,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify([Object.assign({ targets: ($json.__competitors || []).reduce((acc, comp, idx) => { acc[String(idx + 1)] = comp; return acc; }, {}), exclude_targets: [$json.__domain], limit: 200, backlinks_status_type: \"live\", order_by: ['rank,desc'] })]) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -585,6 +585,21 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "id": "restore-spend-ctx",
+      "name": "Restore Spend Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3640,
+        -460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Meter Spend\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
     },
     {
       "id": "prioritize",
@@ -1058,6 +1073,17 @@
       ]
     },
     "Spend Increment": {
+      "main": [
+        [
+          {
+            "node": "Restore Spend Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Spend Ctx": {
       "main": [
         [
           {

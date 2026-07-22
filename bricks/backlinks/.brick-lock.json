@@ -2,7 +2,7 @@
   "brick": "backlinks",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/backlinks.json": "4833ffa69d8ada8dbbcbe19aa095a07679c638187bc05e725c6dca6e50ea21bc",
+    "n8n/workflows/backlinks.json": "9defd0a5a43efa2feaa1a44cd60b743c7ee458298e6df6b9f373b1a8f49489f6",
     "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
     "supabase/templates/backlinks.sql": "cc5ba7763806a9236951fffbd194347d5190457796a13c7f619f029375d5e475"
   }
