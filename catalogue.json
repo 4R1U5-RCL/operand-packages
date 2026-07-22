@@ -1,0 +1,951 @@
+{
+  "schema": 1,
+  "generatedFrom": "operand-studio harness/brick-registry.json",
+  "note": "Reusable studio automation patterns for external harnesses. Filtered to n8n-template + supabase-template components; studio-internal ops-agent / ops-endpoint rails are excluded by design.",
+  "brickCount": 22,
+  "primitives": [
+    "approvedPublicReadTable",
+    "executeWorkflow",
+    "executeWorkflowTrigger",
+    "gmailSend",
+    "gmailTrigger",
+    "guardedHttp",
+    "hmacVerifyCode",
+    "ifNode",
+    "manualFilter",
+    "openRouter",
+    "resendSend",
+    "respondNode",
+    "scheduleTrigger",
+    "securityBarrierView",
+    "supabaseRest",
+    "switchNode",
+    "telegramSend",
+    "webhookTrigger"
+  ],
+  "bricks": [
+    {
+      "key": "analytics_digest",
+      "title": "[analytics_digest] Analytics digest",
+      "status": "planning",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "resendSend",
+        "scheduleTrigger",
+        "supabaseRest"
+      ],
+      "gates": [
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "analytics-digest",
+          "name": "[TEMPLATE] [analytics_digest_plugin] Analytics Digest — PostHog → summarize → notify",
+          "component": "n8n/workflows/analytics-digest.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "analytics-digest-history",
+          "name": "[TEMPLATE] Analytics digest history ([analytics_digest_plugin] brick, run ledger + dedup guard, service-role-only)",
+          "component": "supabase/templates/analytics-digest-history.sql",
+          "published": false
+        }
+      ]
+    },
+    {
+      "key": "backlinks_plugin",
+      "title": "[backlinks_plugin] Backlinks — DataForSEO Backlinks → referring domains + link gaps → prioritize → notify",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 DataForSEO credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "backlinks",
+          "name": "[TEMPLATE] [backlinks_plugin] Backlinks — DataForSEO Backlinks → referring domains + link gaps → prioritize → notify",
+          "component": "n8n/workflows/backlinks.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "competitor_gap_plugin",
+      "title": "[competitor_gap_plugin] Competitor / SERP Gap — DataForSEO Labs → gaps → cluster/prioritize → notify",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 DataForSEO credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "competitor-gap",
+          "name": "[TEMPLATE] [competitor_gap_plugin] Competitor / SERP Gap — DataForSEO Labs → gaps → cluster/prioritize → notify",
+          "component": "n8n/workflows/competitor-gap.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "content_gen_plugin",
+      "title": "[content_gen_plugin] Content Generation — DataForSEO SERP → grounded brief → notify",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 DataForSEO credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "content-gen",
+          "name": "[TEMPLATE] [content_gen_plugin] Content Generation — DataForSEO SERP → grounded brief → notify",
+          "component": "n8n/workflows/content-gen.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "content_tracker_plugin",
+      "title": "[content_tracker_plugin] Content / On-Page Tracker — Firecrawl + DataForSEO → content gaps → notify",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 Firecrawl + DataForSEO credential slots",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "content-tracker",
+          "name": "[TEMPLATE] [content_tracker_plugin] Content / On-Page Tracker — Firecrawl + DataForSEO → content gaps → notify",
+          "component": "n8n/workflows/content-tracker.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "content_wall_plugin",
+      "title": "[content_wall_plugin] Content Wall Collect → Moderate → Publish",
+      "status": "live",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "hmacVerifyCode",
+        "openRouter",
+        "securityBarrierView",
+        "supabaseRest",
+        "webhookTrigger"
+      ],
+      "gates": [
+        "G-1 OpenRouter credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "content-wall-plugin",
+          "name": "[TEMPLATE] [content_wall_plugin] Content Wall Collect → Moderate → Publish (type-parameterized Wall of Love)",
+          "component": "n8n/workflows/content-wall-plugin.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "content-wall",
+          "name": "[TEMPLATE] Content wall ([content_wall_plugin] brick, multi-tenant; service-role base + anon read via content_wall_public security_barrier view)",
+          "component": "supabase/templates/content-wall.sql",
+          "published": true
+        },
+        {
+          "key": "content-wall-moderation-log",
+          "name": "[TEMPLATE] Content wall moderation log ([content_wall_plugin] brick, human-moderation audit, self-contained parent chain, service-role-only)",
+          "component": "supabase/templates/content-wall-moderation-log.sql",
+          "published": true
+        }
+      ]
+    },
+    {
+      "key": "dirnotif_plugin",
+      "title": "[dirnotif_plugin] Community lead radar",
+      "publicName": "Radar",
+      "status": "live",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "openRouter",
+        "resendSend",
+        "scheduleTrigger",
+        "supabaseRest",
+        "webhookTrigger"
+      ],
+      "gates": [
+        "G-1 Reddit / OpenRouter / Telegram credential slots",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "dirnotif-digest",
+          "name": "[TEMPLATE] [dirnotif_plugin] Daily Digest — Agentic Email Add-on",
+          "component": "n8n/workflows/dirnotif-digest.json",
+          "published": false
+        },
+        {
+          "key": "dirnotif-enrichment",
+          "name": "[TEMPLATE] [dirnotif_plugin] Lead Enrichment — LLM Add-on (fail-open child)",
+          "component": "n8n/workflows/dirnotif-enrichment.json",
+          "published": false
+        },
+        {
+          "key": "dirnotif-feedback",
+          "name": "[TEMPLATE] [dirnotif_plugin] Feedback Receiver — Telegram callback (Attended/Deferred/Mute)",
+          "component": "n8n/workflows/dirnotif-feedback.json",
+          "published": false
+        },
+        {
+          "key": "dirnotif-scraper",
+          "name": "[TEMPLATE] [dirnotif_plugin] Community Lead Radar — Scraper (base brick)",
+          "component": "n8n/workflows/dirnotif-scraper.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "dirnotif-config",
+          "name": "[TEMPLATE] Lead radar config ([dirnotif_plugin] brick, owner-managed sources/keywords/thresholds, service-role-only)",
+          "component": "supabase/templates/dirnotif-config.sql",
+          "published": false
+        },
+        {
+          "key": "dirnotif-cursor",
+          "name": "[TEMPLATE] Lead radar cursor ([dirnotif_plugin] brick, per-source poll bookmark, service-role-only)",
+          "component": "supabase/templates/dirnotif-cursor.sql",
+          "published": false
+        },
+        {
+          "key": "dirnotif-digest-log",
+          "name": "[TEMPLATE] Lead radar digest log ([dirnotif_plugin] digest add-on, own send-log, service-role-only)",
+          "component": "supabase/templates/dirnotif-digest-log.sql",
+          "published": false
+        },
+        {
+          "key": "dirnotif-qualified",
+          "name": "[TEMPLATE] Lead radar qualified ([dirnotif_plugin] brick, scored leads + status + feedback, service-role-only)",
+          "component": "supabase/templates/dirnotif-qualified.sql",
+          "published": false
+        },
+        {
+          "key": "dirnotif-seen",
+          "name": "[TEMPLATE] Lead radar seen ([dirnotif_plugin] brick, dedupe + edit-hash, service-role-only)",
+          "component": "supabase/templates/dirnotif-seen.sql",
+          "published": false
+        }
+      ]
+    },
+    {
+      "key": "email_plugin",
+      "title": "[email_plugin] Email lead qualifier",
+      "publicName": "Firstline Email",
+      "status": "live",
+      "spec": "logs/SPEC_operand-email-plugin_2026-07-07.md",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "gmailSend",
+        "gmailTrigger",
+        "guardedHttp",
+        "hmacVerifyCode",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 Google Cloud / gmailOAuth2 credential",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "email-lead-qualifier",
+          "name": "[TEMPLATE] [email_plugin] Email Lead Qualifier — Rule-Based",
+          "component": "n8n/workflows/email-lead-qualifier.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "email-lead-intake",
+          "name": "[TEMPLATE] Email lead intake telemetry ([email_plugin] brick, exclusive, service-role-only)",
+          "component": "supabase/templates/email-lead-intake.sql",
+          "published": true
+        }
+      ]
+    },
+    {
+      "key": "keyword_research_plugin",
+      "title": "[keyword_research_plugin] Keyword Research — DataForSEO → cluster/intent → notify",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 DataForSEO credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "keyword-research",
+          "name": "[TEMPLATE] [keyword_research_plugin] Keyword Research — DataForSEO → cluster/intent → notify",
+          "component": "n8n/workflows/keyword-research.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "llmenri_plugin",
+      "title": "[llmenri_plugin] Lead enrichment — LLM add-on",
+      "publicName": "Readout",
+      "status": "live",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflowTrigger",
+        "hmacVerifyCode",
+        "openRouter",
+        "supabaseRest",
+        "webhookTrigger"
+      ],
+      "gates": [
+        "G-1 OpenRouter credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "llm-enrichment-plugin",
+          "name": "[TEMPLATE] [llmenri_plugin] Lead Enrichment — LLM Add-on",
+          "component": "n8n/workflows/llm-enrichment-plugin.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "n8n_primitives",
+      "title": "[n8n_primitives] Generic template + shape library (catch-all, no case-study brick)",
+      "status": "built",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [],
+      "gates": [],
+      "n8nWorkflows": [
+        {
+          "key": "email-report",
+          "name": "[TEMPLATE] Email Report",
+          "component": "n8n/workflows/email-report.json",
+          "published": true
+        },
+        {
+          "key": "llm-doc-pipeline-mono",
+          "name": "[TEMPLATE] LLM Document Pipeline — Monolithic",
+          "component": "n8n/workflows/llm-doc-pipeline-mono.json",
+          "published": true
+        },
+        {
+          "key": "notification-fanout",
+          "name": "[TEMPLATE] Notification Fan-out",
+          "component": "n8n/workflows/notification-fanout.json",
+          "published": true
+        },
+        {
+          "key": "orchestrator-routing",
+          "name": "[TEMPLATE] Orchestrator + Sub-workflow Routing",
+          "component": "n8n/workflows/orchestrator-routing.json",
+          "published": true
+        },
+        {
+          "key": "outbound-verdict-callback",
+          "name": "[TEMPLATE] Outbound Dispatch + Verdict Callback",
+          "component": "n8n/workflows/outbound-verdict-callback.json",
+          "published": true
+        },
+        {
+          "key": "read-only-json-api",
+          "name": "[TEMPLATE] Read-only JSON API",
+          "component": "n8n/workflows/read-only-json-api.json",
+          "published": true
+        },
+        {
+          "key": "schedule-dispatcher",
+          "name": "[TEMPLATE] Schedule Dispatcher",
+          "component": "n8n/workflows/schedule-dispatcher.json",
+          "published": true
+        },
+        {
+          "key": "shopify-webhook-reread",
+          "name": "[TEMPLATE] Shopify Webhook → Re-read/Invalidate (never mirror)",
+          "component": "n8n/workflows/shopify-webhook-reread.json",
+          "published": true
+        },
+        {
+          "key": "signed-webhook-base",
+          "name": "[TEMPLATE] Signed Webhook → Ack → Process → Respond",
+          "component": "n8n/workflows/signed-webhook-base.json",
+          "published": true
+        },
+        {
+          "key": "sms-state-machine",
+          "name": "[TEMPLATE] SMS/WhatsApp State Machine",
+          "component": "n8n/workflows/sms-state-machine.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "child-owned-via-parent",
+          "name": "[TEMPLATE] Child owned via parent (transitive RLS)",
+          "component": "supabase/templates/child-owned-via-parent.sql",
+          "published": true
+        },
+        {
+          "key": "derived-history",
+          "name": "[TEMPLATE] Derived history (append-only snapshots)",
+          "component": "supabase/templates/derived-history.sql",
+          "published": true
+        },
+        {
+          "key": "per-user-owned",
+          "name": "[TEMPLATE] Per-user owned (app data, RLS by owner)",
+          "component": "supabase/templates/per-user-owned.sql",
+          "published": true
+        },
+        {
+          "key": "public-capture",
+          "name": "[TEMPLATE] Public capture (app data, anon-write / server-read)",
+          "component": "supabase/templates/public-capture.sql",
+          "published": true
+        },
+        {
+          "key": "server-write-only-lock",
+          "name": "[TEMPLATE] Server-write-only column lock (per-user + billing lock)",
+          "component": "supabase/templates/server-write-only-lock.sql",
+          "published": true
+        },
+        {
+          "key": "shopify-cache",
+          "name": "[TEMPLATE] Shopify cache (short-lived, reconciled — never a mirror)",
+          "component": "supabase/templates/shopify-cache.sql",
+          "published": true
+        }
+      ]
+    },
+    {
+      "key": "ops_automation",
+      "title": "[ops_automation] Cloud clock + local runner ops rail",
+      "status": "built",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "guardedHttp",
+        "manualFilter",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-4 hosted n8n clock-arming PUT (owner go)"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "dead-mans-switch",
+          "name": "[TEMPLATE] Dead-Man’s Switch (heartbeat staleness → Telegram)",
+          "component": "n8n/workflows/dead-mans-switch.json",
+          "published": false
+        },
+        {
+          "key": "github-schedule-dispatcher",
+          "name": "[TEMPLATE] GitHub Schedule Dispatcher",
+          "component": "n8n/workflows/github-schedule-dispatcher.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "device-heartbeats",
+          "name": "[TEMPLATE] Device heartbeats (dead-man liveness, service-role-only)",
+          "component": "supabase/templates/device-heartbeats.sql",
+          "published": false
+        },
+        {
+          "key": "ops-schedule",
+          "name": "[TEMPLATE] Ops schedule (studio-owned dispatch queue, service-role-only)",
+          "component": "supabase/templates/ops-schedule.sql",
+          "published": false
+        },
+        {
+          "key": "ops-task-queue",
+          "name": "[TEMPLATE] Ops task queue (pull-based runner queue, enum-only, service-role-only)",
+          "component": "supabase/templates/ops-task-queue.sql",
+          "published": false
+        }
+      ]
+    },
+    {
+      "key": "reactivation_plugin",
+      "title": "[reactivation_plugin] Database reactivation",
+      "publicName": "Rekindle",
+      "status": "planning",
+      "spec": "logs/SPEC_operand-reactivation-plugin_2026-07-08.md",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "hmacVerifyCode",
+        "openRouter",
+        "scheduleTrigger",
+        "supabaseRest",
+        "webhookTrigger"
+      ],
+      "gates": [
+        "G-1 provider + OpenRouter credential slots",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "reactivation-cadence",
+          "name": "[TEMPLATE] [reactivation_plugin] Campaign Cadence Dispatcher",
+          "component": "n8n/workflows/reactivation-cadence.json",
+          "published": false
+        },
+        {
+          "key": "reactivation-reply",
+          "name": "[TEMPLATE] [reactivation_plugin] Reply + Provider Events Router",
+          "component": "n8n/workflows/reactivation-reply.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "reactivation-campaign",
+          "name": "[TEMPLATE] Reactivation campaign ([reactivation_plugin] brick, definition+state, service-role-only)",
+          "component": "supabase/templates/reactivation-campaign.sql",
+          "published": false
+        },
+        {
+          "key": "reactivation-contacts",
+          "name": "[TEMPLATE] Reactivation contacts ([reactivation_plugin] brick, per-contact state, service-role-only)",
+          "component": "supabase/templates/reactivation-contacts.sql",
+          "published": false
+        },
+        {
+          "key": "reactivation-events",
+          "name": "[TEMPLATE] Reactivation events ([reactivation_plugin] brick, cadence ledger, service-role-only)",
+          "component": "supabase/templates/reactivation-events.sql",
+          "published": false
+        },
+        {
+          "key": "reactivation-replies",
+          "name": "[TEMPLATE] Reactivation replies ([reactivation_plugin] brick, classified inbound, service-role-only)",
+          "component": "supabase/templates/reactivation-replies.sql",
+          "published": false
+        }
+      ]
+    },
+    {
+      "key": "scheduled_digest",
+      "title": "[scheduled_digest] Scheduled Digest — read → summarize → deliver → log",
+      "publicName": "Digest",
+      "status": "live",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "resendSend",
+        "scheduleTrigger",
+        "supabaseRest"
+      ],
+      "gates": [
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "scheduled-digest",
+          "name": "[TEMPLATE] [scheduled_digest] Scheduled Digest — read → summarize → deliver → log (public: Digest)",
+          "component": "n8n/workflows/scheduled-digest.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "scheduled-digest-log",
+          "name": "[TEMPLATE] Scheduled digest log ([scheduled_digest] engine, unified send-log + reserve-then-deliver dedup guard, service-role-only)",
+          "component": "supabase/templates/scheduled-digest-log.sql",
+          "published": true
+        }
+      ]
+    },
+    {
+      "key": "seo_audit_orchestrator_plugin",
+      "title": "[seo_audit_orchestrator_plugin] SEO Audit Orchestrator — compose bricks → dedup → prioritize → work-queue → notify",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "seo-audit-orchestrator",
+          "name": "[TEMPLATE] [seo_audit_orchestrator_plugin] SEO Audit Orchestrator — compose bricks → dedup → prioritize → work-queue → notify",
+          "component": "n8n/workflows/seo-audit-orchestrator.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "seo_fix_generator_plugin",
+      "title": "[seo_fix_generator_plugin] SEO Fix Generator — audit queue → grounded candidate fixes → notify",
+      "status": "built",
+      "spec": "logs/SEO_REMEDIATION_BRICKS_PLAN_2026-07-21.md",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 OpenRouter LLM child (fail-open, optional)",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "seo-fix-generator",
+          "name": "[TEMPLATE] [seo_fix_generator_plugin] SEO Fix Generator — audit queue → grounded candidate fixes → notify",
+          "component": "n8n/workflows/seo-fix-generator.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "seo-fix-generator",
+          "name": "[TEMPLATE] SEO fix generator ledgers ([seo_fix_generator_plugin] brick, candidate-fixes + fix-run, service-role-only)",
+          "component": "supabase/templates/seo-fix-generator.sql",
+          "published": false
+        }
+      ]
+    },
+    {
+      "key": "seo_improver",
+      "title": "[seo_improver_plugin] SEO Improver — detect (n8n) + auto-PR apply (ops-agent)",
+      "publicName": "Rankwatch",
+      "status": "parked",
+      "spec": "logs/SPEC_operand-seo-improver_2026-07-16.md",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 GSC/DataForSEO credential slot",
+        "G-2 fine-grained operand-web GitHub PAT",
+        "G-4 live activation PUT",
+        "G-5 live GSC OAuth service-account cred (§2b — CSV stopgap remains the no-OAuth fallback)",
+        "G-6 CMS apply-mode adapter (§1 Tier-2, one per paying demand — DEFERRED)",
+        "G-7 product-surface dashboard (§3 — DEFERRED; reporting-digest skin is the cheap interim, not built)"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "gsc-api",
+          "name": "[TEMPLATE] [gsc_api_plugin] GSC Integration (live Search Console API) — SEO Additions §2b",
+          "component": "n8n/workflows/gsc-api.json",
+          "published": false
+        },
+        {
+          "key": "seo-improver",
+          "name": "[TEMPLATE] [seo_improver_plugin] SEO Improver — DataForSEO → movement → heuristics → notify",
+          "component": "n8n/workflows/seo-improver.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "apply-runs",
+          "name": "[TEMPLATE] SEO apply-run ledger ([seo_pr_apply] brick, PRs/manual/blockers per run, service-role-only)",
+          "component": "supabase/templates/apply-runs.sql",
+          "published": false
+        },
+        {
+          "key": "seo-additions-migration",
+          "name": "[TEMPLATE] SEO Additions migration (pr_url writeback + apply_mode + SERP/AIO columns + SEO-AIO/queued CHECK)",
+          "component": "supabase/templates/seo-additions-migration.sql",
+          "published": false
+        }
+      ]
+    },
+    {
+      "key": "seo_monitor_plugin",
+      "title": "[seo_monitor_plugin] SEO Health Monitor — Firecrawl-diff → change events → alert",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 Firecrawl credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "seo-monitor",
+          "name": "[TEMPLATE] [seo_monitor_plugin] SEO Health Monitor — Firecrawl-diff → change events → alert",
+          "component": "n8n/workflows/seo-monitor.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "sms_plugin",
+      "title": "[sms_plugin] SMS lead qualifier",
+      "publicName": "Firstline SMS",
+      "status": "built",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "hmacVerifyCode",
+        "supabaseRest",
+        "webhookTrigger"
+      ],
+      "gates": [
+        "G-1 SMS provider credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "sms-lead-qualifier",
+          "name": "[TEMPLATE] SMS Lead Qualifier — Rule-Based",
+          "component": "n8n/workflows/sms-lead-qualifier.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "sms-lead-sessions",
+          "name": "[TEMPLATE] SMS lead sessions ([sms_plugin] brick, exclusive, service-role-only)",
+          "component": "supabase/templates/sms-lead-sessions.sql",
+          "published": false
+        }
+      ]
+    },
+    {
+      "key": "technical_audit_plugin",
+      "title": "[technical_audit_plugin] Technical Site Audit — DataForSEO on-page + PageSpeed → ranked findings → notify",
+      "status": "live",
+      "spec": "logs/PLAN_seo-suite-roadmap_2026-07-16.md",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "executeWorkflow",
+        "guardedHttp",
+        "scheduleTrigger",
+        "supabaseRest",
+        "telegramSend"
+      ],
+      "gates": [
+        "G-1 DataForSEO credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "technical-audit",
+          "name": "[TEMPLATE] [technical_audit_plugin] Technical Site Audit — DataForSEO on-page + PageSpeed → ranked findings → notify",
+          "component": "n8n/workflows/technical-audit.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": []
+    },
+    {
+      "key": "testimonial_plugin",
+      "title": "[testimonial_plugin] Testimonial Wall of Love",
+      "publicName": "Vouch",
+      "status": "live",
+      "spec": "logs/SPEC_operand-testimonial-widget_2026-07-08.md",
+      "appClasses": [
+        "n8n-template",
+        "supabase-template"
+      ],
+      "primitives": [
+        "approvedPublicReadTable",
+        "executeWorkflow",
+        "hmacVerifyCode",
+        "openRouter",
+        "securityBarrierView",
+        "supabaseRest",
+        "webhookTrigger"
+      ],
+      "gates": [
+        "G-1 OpenRouter credential slot",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "testimonial-plugin",
+          "name": "[TEMPLATE] [testimonial_plugin] Testimonial Collect → Moderate → Publish",
+          "component": "n8n/workflows/testimonial-plugin.json",
+          "published": true
+        }
+      ],
+      "supabaseTables": [
+        {
+          "key": "testimonial-moderation-log",
+          "name": "[TEMPLATE] Testimonial moderation log ([testimonial_plugin] brick, audit, service-role-only)",
+          "component": "supabase/templates/testimonial-moderation-log.sql",
+          "published": true
+        },
+        {
+          "key": "testimonials",
+          "name": "[TEMPLATE] Testimonials (multi-tenant; service-role base + anon read via testimonials_public security_barrier view)",
+          "component": "supabase/templates/testimonials.sql",
+          "published": true
+        }
+      ]
+    },
+    {
+      "key": "triage_plugin",
+      "title": "[triage_plugin] Triage Receiver — Telegram callback verdict layer",
+      "status": "built",
+      "appClasses": [
+        "n8n-template"
+      ],
+      "primitives": [
+        "guardedHttp",
+        "hmacVerifyCode",
+        "ifNode",
+        "respondNode",
+        "supabaseRest",
+        "switchNode",
+        "webhookTrigger"
+      ],
+      "gates": [
+        "G-1 Telegram bot token + webhook secret slots",
+        "G-4 live activation PUT"
+      ],
+      "n8nWorkflows": [
+        {
+          "key": "triage-receiver",
+          "name": "[TEMPLATE] [triage_plugin] Triage Receiver — Telegram callback verdict layer (reusable, owns no table)",
+          "component": "n8n/workflows/triage-receiver.json",
+          "published": false
+        }
+      ],
+      "supabaseTables": []
+    }
+  ]
+}
