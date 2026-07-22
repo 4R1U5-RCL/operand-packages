@@ -1,0 +1,946 @@
+{
+  "name": "[TEMPLATE] [seo_fix_generator_plugin] SEO Fix Generator — audit queue → grounded candidate fixes → notify",
+  "nodes": [
+    {
+      "id": "every-week",
+      "name": "Every Week",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nconst tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\nconst brand = safe(() => (($vars.SEO_BRAND || $vars.SEO_CLIENT_NAME || '')));\nconst domain = safe(() => (($vars.SEO_DOMAIN || '')));\nconst day = (ms) => new Date(ms).toISOString().slice(0, 10);\nconst runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\nreturn [{ json: {\n  __tenant: tenant,\n  __brand: brand,\n  __domain: domain,\n  __run_date: day(runMs),\n} }];"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-latest-run",
+      "name": "Read Latest Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_audit_runs?select=run_date,status,target,summary&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&order=run_date.desc&limit=1",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "capture-run",
+      "name": "Capture Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const runOk = !(status && (status < 200 || status >= 300));\n  const run = (runOk && rows.length > 0) ? rows[0] : null;\n  out.push({ json: Object.assign({}, c, {\n    __run_ok: runOk,\n    __latest_run: run,\n    __latest_run_date: run && run.run_date ? String(run.run_date) : null,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-queue",
+      "name": "Read Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_audit_queue?select=task_id,url_or_entity,issue_classes,severity,priority_score,recommendation,merged_from,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&run_date=eq.{{ encodeURIComponent($json.__latest_run_date) }}&status=eq.open&order=priority_score.desc,task_id.asc&limit=100",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "build-fixes",
+      "name": "Build Fixes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nfunction hex(n) { return ('00000000' + (n >>> 0).toString(16)).slice(-8); }\nfunction clampWords(s, max) {\n  // Deterministic length cap that avoids cutting mid-word where possible.\n  s = String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\n  if (s.length <= max) return s;\n  var cut = s.slice(0, max);\n  var sp = cut.lastIndexOf(' ');\n  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).trim();\n}\nfunction firstClass(classes) {\n  var arr = Array.isArray(classes) ? classes.map(function (x) { return String(x).toLowerCase(); }) : [];\n  return arr;\n}\n// Route a SINGLE issue class to its fix_type (deterministic-first precedence). A keyword\n// opportunity IS a content brief (write content targeting the theme) → content_brief.\nfunction routeClass(cls) {\n  var s = String(cls).toLowerCase();\n  if (/\\btitle\\b/.test(s)) return 'meta_title';\n  if (/heading|\\bh1\\b/.test(s)) return 'h1';\n  if (/schema|structured|json[- ]?ld|rich[- ]?result/.test(s)) return 'jsonld_schema';\n  if (/meta|description|low[- ]?ctr|snippet/.test(s)) return 'meta_description';\n  if (/^kw:|kw:opportunity|keyword opportunit/.test(s)) return 'content_brief';\n  if (/coverage|gap|brief|thin|content/.test(s)) return 'content_brief';\n  if (/copy|rewrite|readability|tone/.test(s)) return 'copy_edit';\n  return null; // no supported fix_type for this class\n}\n// A task carries MANY issue classes (the orchestrator groups all of an entity's findings into one\n// task). Emit a fix per DISTINCT fix_type so the homepage's title+h1+meta+schema+coverage issues\n// each get their own grounded fix — not just the first. Deduped + order-stable. A task whose\n// classes route to NOTHING is skipped (never fabricated).\nfunction routeAllFixTypes(classes) {\n  var seen = {};\n  var out = [];\n  for (var i = 0; i < classes.length; i++) {\n    var t = routeClass(classes[i]);\n    if (t && !seen[t]) { seen[t] = 1; out.push(t); }\n  }\n  return out;\n}\nconst ctx = $('Capture Run').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const queueOk = !(status && (status < 200 || status >= 300));\n  const tenant = c.__tenant || 'operand';\n  const brand = c.__brand || null;\n  const domain = c.__domain || null;\n  const fixes = [];\n  let skipped = 0;\n  const MAX = 100;\n  if (c.__run_ok && queueOk) {\n    for (const r of rows.slice(0, MAX)) {\n      if (!r || typeof r !== 'object') { continue; }\n      // finding_id is REQUIRED for grounding: prefer the task's stable task_id, then its recorded\n      // finding id. A task with neither is SKIPPED — never written with a null finding_id.\n      const taskId = (r.task_id != null && String(r.task_id).trim()) ? String(r.task_id).trim() : null;\n      const findingId = taskId\n        || (r.finding_id != null && String(r.finding_id).trim() ? String(r.finding_id).trim() : null);\n      if (!findingId || !taskId) { skipped++; continue; }\n      const classes = firstClass(r.issue_classes);\n      const fixTypes = routeAllFixTypes(classes);\n      if (!fixTypes.length) { skipped++; continue; }\n      const targetUrl = (r.url_or_entity != null && String(r.url_or_entity).trim()) ? String(r.url_or_entity).trim() : null;\n      // DURABLE finding-level provenance: task_id is a DEDUP/CLUSTER surrogate (it can DRIFT across\n      // re-audits when clustering changes), so we ALSO persist merged_from — the union of the\n      // ORIGINAL child finding_ids the orchestrator collapsed into this task (its jsonb dedup trail).\n      // Normalise each entry to its finding id (the queue stores {source_brick, finding_id} objects\n      // OR bare id strings); a re-audit whose task_ids drift still traces the fix to the real findings.\n      const mergedFrom = [];\n      const mfRaw = Array.isArray(r.merged_from) ? r.merged_from : [];\n      const mfSeen = {};\n      for (const m of mfRaw) {\n        let fid = null;\n        if (m == null) continue;\n        if (typeof m === 'object') { fid = m.finding_id != null ? String(m.finding_id) : (m.id != null ? String(m.id) : null); }\n        else { fid = String(m); }\n        if (fid && fid.trim() && !mfSeen[fid]) { mfSeen[fid] = 1; mergedFrom.push(fid.trim()); }\n      }\n      // GROUNDED evidence snapshot (copied from the task — the fix traces to this).\n      const groundedFrom = {\n        task_id: taskId,\n        merged_from: mergedFrom,\n        url_or_entity: targetUrl,\n        issue_classes: Array.isArray(r.issue_classes) ? r.issue_classes : [],\n        severity: r.severity == null ? null : String(r.severity),\n        priority_score: Number.isFinite(Number(r.priority_score)) ? Number(r.priority_score) : null,\n        recommendation: r.recommendation == null ? null : String(r.recommendation),\n        run_date: c.__latest_run_date || null,\n      };\n      // A grounded keyword handle for the deterministic scaffolds: the recommendation phrase, else\n      // the URL slug, else the first issue class. NEVER invented from outside the task.\n      let kwSource = r.recommendation != null ? String(r.recommendation) : '';\n      if (!kwSource && targetUrl) {\n        const seg = String(targetUrl).split(/[?#]/)[0].split('/').filter(Boolean).pop() || '';\n        kwSource = seg.replace(/[-_]+/g, ' ').replace(/\\.[a-z0-9]+$/i, '');\n      }\n      if (!kwSource) kwSource = classes[0] || 'page';\n      kwSource = kwSource.replace(/\\s+/g, ' ').trim();\n      // Title-case the grounded phrase for the human-facing scaffolds (deterministic).\n      const titled = kwSource.split(' ').filter(Boolean).map(function (w) {\n        return w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w;\n      }).join(' ');\n\n      // Emit a distinct grounded fix per routed fix_type (multi-issue tasks → multiple fixes).\n      for (const fixType of fixTypes) {\n      let fixPayload = null;\n      let needsLlm = false;\n      if (fixType === 'meta_title') {\n        // ≤60 chars, brand suffix only if it fits (deterministic).\n        let title = titled;\n        if (brand) {\n          const withBrand = clampWords(titled, 60 - (brand.length + 3)) + ' | ' + brand;\n          title = withBrand.length <= 60 ? withBrand : clampWords(titled, 60);\n        } else {\n          title = clampWords(titled, 60);\n        }\n        fixPayload = { proposed_title: clampWords(title, 60), max_length: 60 };\n      } else if (fixType === 'h1') {\n        fixPayload = { proposed_h1: clampWords(titled, 70) };\n      } else if (fixType === 'meta_description') {\n        // ≤155-char scaffold built ONLY from GROUNDED values — no invented boilerplate. Prefer the\n        // task's recommendation verbatim (it is the audit's own grounded guidance); else a minimal\n        // scaffold of the real keyword phrase + brand ONLY (both grounded). Nothing fabricated;\n        // a human/LLM refines the copy later.\n        const rec = (r.recommendation != null && String(r.recommendation).trim()) ? String(r.recommendation).trim() : null;\n        const scaffold = rec || (titled + (brand ? (' — ' + brand) : ''));\n        fixPayload = { proposed_meta_description: clampWords(scaffold, 155), max_length: 155, grounded_source: rec ? 'recommendation' : 'keyword+brand' };\n      } else if (fixType === 'jsonld_schema') {\n        // DETERMINISTIC JSON-LD (no LLM; owner decision #5). Built ONLY from grounded values —\n        // NEVER a placeholder name/@type/URL. @type + name require a REAL entity: use the config\n        // brand when present (Organization, name=brand). Absent a brand we cannot ground an entity\n        // NAME, so we describe the PAGE (WebPage) from the grounded page title. Every field is\n        // OMITTED when its grounded source is absent (no invented description, no dummy NAP).\n        const schemaUrl = targetUrl || (domain ? ('https://' + String(domain).replace(/^https?:\\/\\//, '')) : null);\n        const jsonld = { '@context': 'https://schema.org' };\n        if (brand) {\n          jsonld['@type'] = 'Organization';\n          jsonld.name = brand;             // grounded: config brand\n        } else {\n          jsonld['@type'] = 'WebPage';\n          if (titled) jsonld.name = titled; // grounded: the task's page title/keyword phrase\n        }\n        if (schemaUrl) jsonld.url = schemaUrl; // grounded: task url_or_entity or config domain\n        // No description / address / logo / sameAs — those are not present in the grounded data,\n        // so they are OMITTED rather than fabricated (finding #2). A downstream human/LLM enriches.\n        fixPayload = { jsonld: jsonld, grounded_fields: Object.keys(jsonld).filter(function (k) { return k !== '@context'; }) };\n      } else if (fixType === 'content_brief' || fixType === 'copy_edit') {\n        // The LLM brief/copy seam drafts these; a deterministic draft_pending placeholder is the\n        // fail-open fallback so the fix ALWAYS lands.\n        needsLlm = true;\n        fixPayload = { note: 'draft pending', target_keyword: kwSource, kind: fixType };\n      }\n\n      const fixId = fixType + '-' + hex(hash(findingId + '|' + fixType));\n      fixes.push({\n        tenant: tenant,\n        fix_id: fixId,\n        finding_id: findingId,\n        merged_from: mergedFrom,\n        task_id: taskId,\n        source_brick: 'seo-fix-generator',\n        fix_type: fixType,\n        target_url: targetUrl,\n        fix_payload: fixPayload,\n        grounded_from: groundedFrom,\n        model: null,\n        status: needsLlm ? 'draft_pending' : 'generated',\n        __needs_llm: needsLlm,\n      });\n      }\n    }\n  }\n  out.push({ json: Object.assign({}, c, {\n    __fixes: fixes,\n    __skipped: skipped,\n    __has_llm_tasks: fixes.some(function (f) { return f.__needs_llm; }),\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "read-existing",
+      "name": "Read Existing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_fixes?select=fix_id,status&tenant=eq.{{ encodeURIComponent($json.__tenant) }}&status=in.(approved,applied,verified,rejected,failed)",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "guard-existing",
+      "name": "Guard Existing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Build Fixes').all();\nconst items = $input.all();\nconst out = [];\nconst HUMAN = { approved: 1, applied: 1, verified: 1, rejected: 1, failed: 1 };\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let existing = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(existing)) existing = existing ? [existing] : [];\n  const locked = {};\n  for (const e of existing) {\n    if (e && e.fix_id != null && HUMAN[String(e.status || '').toLowerCase()]) locked[String(e.fix_id)] = true;\n  }\n  const all = Array.isArray(c.__fixes) ? c.__fixes : [];\n  const kept = all.filter(function (f) { return !locked[String(f.fix_id)]; });\n  const droppedForHuman = all.length - kept.length;\n  out.push({ json: Object.assign({}, c, {\n    __fixes: kept,\n    __dropped_human: droppedForHuman,\n    __has_llm_tasks: kept.some(function (f) { return f.__needs_llm; }),\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "llm-fixes",
+      "name": "LLM Fixes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "llm-fixes-cond",
+              "leftValue": "={{ $json.__has_llm_tasks === true && (($vars.SEO_FIX_LLM_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "spend-read",
+      "name": "Spend Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        -120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/global_send_quotas?select=spend_usd,count&channel=eq.llm&sender_id=eq.llm-daily&window_start=eq.{{ encodeURIComponent(new Date().toISOString().slice(0,10)) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "spend-gate",
+      "name": "Spend Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"SEO_LLM_DAILY_CAP\"));\nconst ctx = $('Guard Existing').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const row = rows[0] || {};\n  const spent = Number(row.spend_usd != null ? row.spend_usd : (row.count != null ? row.count : 0)) || 0;\n  const under = !Number.isFinite(CAP) || CAP <= 0 ? true : spent < CAP;\n  out.push({ json: Object.assign({}, c, { __spend_under_cap: under }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "under-cap",
+      "name": "Under Cap?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "under-cap-cond",
+              "leftValue": "={{ $json.__spend_under_cap === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "draft-llm-fixes",
+      "name": "Draft LLM Fixes",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        -200
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.SEO_FIX_LLM_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach-llm",
+      "name": "Attach LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -200
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Spend Gate').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const drafts = (p && typeof p === 'object' && p.drafts && typeof p.drafts === 'object') ? p.drafts : {};\n  let drafted = 0;\n  const fixes = (Array.isArray(c.__fixes) ? c.__fixes : []).map(function (f) {\n    if (!f.__needs_llm) return f;\n    const cand = drafts[f.fix_id];\n    if (typeof cand === 'string' && cand.trim()) {\n      drafted++;\n      const payload = Object.assign({}, f.fix_payload || {}, { draft: cand.trim().slice(0, 4000), note: null });\n      return Object.assign({}, f, { fix_payload: payload, status: 'generated', model: 'llm' });\n    }\n    return f; // no usable draft → stays draft_pending (fail-open)\n  });\n  out.push({ json: Object.assign({}, c, { __fixes: fixes, __llm_drafted: drafted }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-llm",
+      "name": "Skip LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: Object.assign({}, it.json, { __llm_drafted: 0 }) }));"
+      }
+    },
+    {
+      "id": "meter-spend",
+      "name": "Meter Spend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -360
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\n\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (items[i] && items[i].json) || {};\n  \n  if (!c[\"__llm_drafted\"]) { out.push({ json: Object.assign({}, c, { [\"__spend_delta\"]: 0 }) }); continue; }\n  let delta = Number(readSecret(\"SEO_LLM_USD_PER_CALL\"));\nif (!Number.isFinite(delta)) delta = 0.02;\n  if (!Number.isFinite(delta) || delta < 0) delta = 0;\n  out.push({ json: Object.assign({}, c, { [\"__spend_delta\"]: delta }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "real-spend",
+      "name": "Real Spend?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -460
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "real-spend-cond",
+              "leftValue": "={{ (Number($json.__spend_delta) || 0) > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "spend-increment",
+      "name": "Spend Increment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3080,
+        -560
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/rpc/incr_send_quota",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_window_start: new Date().toISOString().slice(0,10), p_channel: \"llm\", p_sender_id: \"llm-daily\", p_count: 1, p_spend_usd: (Number($json.__spend_delta) || 0) }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "restore-spend-ctx",
+      "name": "Restore Spend Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Meter Spend\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "assemble-fixes",
+      "name": "Assemble Fixes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json || {};\n  const now = new Date().toISOString();\n  const fixes = (Array.isArray(j.__fixes) ? j.__fixes : []).map(function (f) {\n    return {\n      tenant: f.tenant,\n      fix_id: f.fix_id,\n      finding_id: f.finding_id,\n      merged_from: Array.isArray(f.merged_from) ? f.merged_from : [],\n      task_id: f.task_id,\n      source_brick: f.source_brick,\n      fix_type: f.fix_type,\n      target_url: f.target_url,\n      fix_payload: f.fix_payload,\n      grounded_from: f.grounded_from,\n      model: f.model,\n      status: f.status,\n      pr_url: null,\n      run_date: j.__run_date,\n      updated_at: now,\n    };\n  });\n  const generated = fixes.filter(function (f) { return f.status === 'generated'; }).length;\n  const draftPending = fixes.filter(function (f) { return f.status === 'draft_pending'; }).length;\n  return { json: Object.assign({}, j, {\n    __final_fixes: fixes,\n    __count_generated: generated,\n    __count_draft_pending: draftPending,\n    __count_total: fixes.length,\n  }) };\n});"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-fixes",
+      "name": "Write Fixes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_fixes?on_conflict=tenant,fix_id",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__final_fixes || []) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "restore-after-write",
+      "name": "Restore After Write",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Assemble Fixes').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-fix-run",
+      "name": "Write Fix Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_fix_runs?on_conflict=tenant,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tenant: $json.__tenant, run_date: $json.__run_date, fixes_generated: $json.__count_generated, fixes_draft_pending: $json.__count_draft_pending, fixes_skipped: ($json.__skipped || 0), status: ($json.__run_ok ? \"complete\" : \"no_data\"), source_facts: { latest_run_date: $json.__latest_run_date, dropped_human: ($json.__dropped_human || 0), llm_drafted: ($json.__llm_drafted || 0) } }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "restore-after-run",
+      "name": "Restore After Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Restore After Write').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const total = Number(j.__count_total || 0);\n  const gen = Number(j.__count_generated || 0);\n  const dp = Number(j.__count_draft_pending || 0);\n  let message;\n  if (!j.__run_ok) {\n    message = '🛠️ SEO fixes — no audit run found for this tenant; nothing to remediate this cycle.';\n  } else if (total === 0) {\n    message = '🛠️ SEO fixes — no open findings to fix this cycle (queue empty or all already handled).';\n  } else {\n    message = '🛠️ SEO fixes READY FOR REVIEW — ' + total + ' candidate fix(es): ' + gen +\n      ' generated, ' + dp + ' awaiting a draft. Approve to queue them for the applier.';\n  }\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'seo_fix_generator',\n    tenant: j.__tenant || null,\n    run_date: j.__run_date || null,\n    fixes_total: total,\n    fixes_generated: gen,\n    fixes_draft_pending: dp,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4620,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every Week": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Read Latest Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Latest Run": {
+      "main": [
+        [
+          {
+            "node": "Capture Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Run": {
+      "main": [
+        [
+          {
+            "node": "Read Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Queue": {
+      "main": [
+        [
+          {
+            "node": "Build Fixes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Fixes": {
+      "main": [
+        [
+          {
+            "node": "Read Existing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Existing": {
+      "main": [
+        [
+          {
+            "node": "Guard Existing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard Existing": {
+      "main": [
+        [
+          {
+            "node": "LLM Fixes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Fixes?": {
+      "main": [
+        [
+          {
+            "node": "Spend Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Read": {
+      "main": [
+        [
+          {
+            "node": "Spend Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Gate": {
+      "main": [
+        [
+          {
+            "node": "Under Cap?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Under Cap?": {
+      "main": [
+        [
+          {
+            "node": "Draft LLM Fixes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft LLM Fixes": {
+      "main": [
+        [
+          {
+            "node": "Attach LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach LLM": {
+      "main": [
+        [
+          {
+            "node": "Meter Spend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meter Spend": {
+      "main": [
+        [
+          {
+            "node": "Real Spend?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Real Spend?": {
+      "main": [
+        [
+          {
+            "node": "Spend Increment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Assemble Fixes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Increment": {
+      "main": [
+        [
+          {
+            "node": "Restore Spend Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Spend Ctx": {
+      "main": [
+        [
+          {
+            "node": "Assemble Fixes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip LLM": {
+      "main": [
+        [
+          {
+            "node": "Assemble Fixes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Fixes": {
+      "main": [
+        [
+          {
+            "node": "Write Fixes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Fixes": {
+      "main": [
+        [
+          {
+            "node": "Restore After Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore After Write": {
+      "main": [
+        [
+          {
+            "node": "Write Fix Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Fix Run": {
+      "main": [
+        [
+          {
+            "node": "Restore After Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore After Run": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}

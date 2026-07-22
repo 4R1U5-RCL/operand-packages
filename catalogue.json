@@ -45,7 +45,7 @@
           "key": "analytics-digest",
           "name": "[TEMPLATE] [analytics_digest_plugin] Analytics Digest — PostHog → summarize → notify",
           "component": "n8n/workflows/analytics-digest.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": [
@@ -53,7 +53,7 @@
           "key": "analytics-digest-history",
           "name": "[TEMPLATE] Analytics digest history ([analytics_digest_plugin] brick, run ledger + dedup guard, service-role-only)",
           "component": "supabase/templates/analytics-digest-history.sql",
-          "published": false
+          "published": true
         }
       ]
     },
@@ -243,25 +243,25 @@
           "key": "dirnotif-digest",
           "name": "[TEMPLATE] [dirnotif_plugin] Daily Digest — Agentic Email Add-on",
           "component": "n8n/workflows/dirnotif-digest.json",
-          "published": false
+          "published": true
         },
         {
           "key": "dirnotif-enrichment",
           "name": "[TEMPLATE] [dirnotif_plugin] Lead Enrichment — LLM Add-on (fail-open child)",
           "component": "n8n/workflows/dirnotif-enrichment.json",
-          "published": false
+          "published": true
         },
         {
           "key": "dirnotif-feedback",
           "name": "[TEMPLATE] [dirnotif_plugin] Feedback Receiver — Telegram callback (Attended/Deferred/Mute)",
           "component": "n8n/workflows/dirnotif-feedback.json",
-          "published": false
+          "published": true
         },
         {
           "key": "dirnotif-scraper",
           "name": "[TEMPLATE] [dirnotif_plugin] Community Lead Radar — Scraper (base brick)",
           "component": "n8n/workflows/dirnotif-scraper.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": [
@@ -269,31 +269,31 @@
           "key": "dirnotif-config",
           "name": "[TEMPLATE] Lead radar config ([dirnotif_plugin] brick, owner-managed sources/keywords/thresholds, service-role-only)",
           "component": "supabase/templates/dirnotif-config.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "dirnotif-cursor",
           "name": "[TEMPLATE] Lead radar cursor ([dirnotif_plugin] brick, per-source poll bookmark, service-role-only)",
           "component": "supabase/templates/dirnotif-cursor.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "dirnotif-digest-log",
           "name": "[TEMPLATE] Lead radar digest log ([dirnotif_plugin] digest add-on, own send-log, service-role-only)",
           "component": "supabase/templates/dirnotif-digest-log.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "dirnotif-qualified",
           "name": "[TEMPLATE] Lead radar qualified ([dirnotif_plugin] brick, scored leads + status + feedback, service-role-only)",
           "component": "supabase/templates/dirnotif-qualified.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "dirnotif-seen",
           "name": "[TEMPLATE] Lead radar seen ([dirnotif_plugin] brick, dedupe + edit-hash, service-role-only)",
           "component": "supabase/templates/dirnotif-seen.sql",
-          "published": false
+          "published": true
         }
       ]
     },
@@ -389,7 +389,7 @@
           "key": "llm-enrichment-plugin",
           "name": "[TEMPLATE] [llmenri_plugin] Lead Enrichment — LLM Add-on",
           "component": "n8n/workflows/llm-enrichment-plugin.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": []
@@ -528,13 +528,13 @@
           "key": "dead-mans-switch",
           "name": "[TEMPLATE] Dead-Man’s Switch (heartbeat staleness → Telegram)",
           "component": "n8n/workflows/dead-mans-switch.json",
-          "published": false
+          "published": true
         },
         {
           "key": "github-schedule-dispatcher",
           "name": "[TEMPLATE] GitHub Schedule Dispatcher",
           "component": "n8n/workflows/github-schedule-dispatcher.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": [
@@ -542,19 +542,19 @@
           "key": "device-heartbeats",
           "name": "[TEMPLATE] Device heartbeats (dead-man liveness, service-role-only)",
           "component": "supabase/templates/device-heartbeats.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "ops-schedule",
           "name": "[TEMPLATE] Ops schedule (studio-owned dispatch queue, service-role-only)",
           "component": "supabase/templates/ops-schedule.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "ops-task-queue",
           "name": "[TEMPLATE] Ops task queue (pull-based runner queue, enum-only, service-role-only)",
           "component": "supabase/templates/ops-task-queue.sql",
-          "published": false
+          "published": true
         }
       ]
     },
@@ -586,13 +586,13 @@
           "key": "reactivation-cadence",
           "name": "[TEMPLATE] [reactivation_plugin] Campaign Cadence Dispatcher",
           "component": "n8n/workflows/reactivation-cadence.json",
-          "published": false
+          "published": true
         },
         {
           "key": "reactivation-reply",
           "name": "[TEMPLATE] [reactivation_plugin] Reply + Provider Events Router",
           "component": "n8n/workflows/reactivation-reply.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": [
@@ -600,25 +600,25 @@
           "key": "reactivation-campaign",
           "name": "[TEMPLATE] Reactivation campaign ([reactivation_plugin] brick, definition+state, service-role-only)",
           "component": "supabase/templates/reactivation-campaign.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "reactivation-contacts",
           "name": "[TEMPLATE] Reactivation contacts ([reactivation_plugin] brick, per-contact state, service-role-only)",
           "component": "supabase/templates/reactivation-contacts.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "reactivation-events",
           "name": "[TEMPLATE] Reactivation events ([reactivation_plugin] brick, cadence ledger, service-role-only)",
           "component": "supabase/templates/reactivation-events.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "reactivation-replies",
           "name": "[TEMPLATE] Reactivation replies ([reactivation_plugin] brick, classified inbound, service-role-only)",
           "component": "supabase/templates/reactivation-replies.sql",
-          "published": false
+          "published": true
         }
       ]
     },
@@ -711,7 +711,7 @@
           "key": "seo-fix-generator",
           "name": "[TEMPLATE] [seo_fix_generator_plugin] SEO Fix Generator — audit queue → grounded candidate fixes → notify",
           "component": "n8n/workflows/seo-fix-generator.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": [
@@ -719,7 +719,7 @@
           "key": "seo-fix-generator",
           "name": "[TEMPLATE] SEO fix generator ledgers ([seo_fix_generator_plugin] brick, candidate-fixes + fix-run, service-role-only)",
           "component": "supabase/templates/seo-fix-generator.sql",
-          "published": false
+          "published": true
         }
       ]
     },
@@ -753,7 +753,7 @@
           "key": "gsc-api",
           "name": "[TEMPLATE] [gsc_api_plugin] GSC Integration (live Search Console API) — SEO Additions §2b",
           "component": "n8n/workflows/gsc-api.json",
-          "published": false
+          "published": true
         },
         {
           "key": "seo-improver",
@@ -767,13 +767,13 @@
           "key": "apply-runs",
           "name": "[TEMPLATE] SEO apply-run ledger ([seo_pr_apply] brick, PRs/manual/blockers per run, service-role-only)",
           "component": "supabase/templates/apply-runs.sql",
-          "published": false
+          "published": true
         },
         {
           "key": "seo-additions-migration",
           "name": "[TEMPLATE] SEO Additions migration (pr_url writeback + apply_mode + SERP/AIO columns + SEO-AIO/queued CHECK)",
           "component": "supabase/templates/seo-additions-migration.sql",
-          "published": false
+          "published": true
         }
       ]
     },
@@ -830,7 +830,7 @@
           "key": "sms-lead-qualifier",
           "name": "[TEMPLATE] SMS Lead Qualifier — Rule-Based",
           "component": "n8n/workflows/sms-lead-qualifier.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": [
@@ -838,7 +838,7 @@
           "key": "sms-lead-sessions",
           "name": "[TEMPLATE] SMS lead sessions ([sms_plugin] brick, exclusive, service-role-only)",
           "component": "supabase/templates/sms-lead-sessions.sql",
-          "published": false
+          "published": true
         }
       ]
     },
@@ -942,7 +942,7 @@
           "key": "triage-receiver",
           "name": "[TEMPLATE] [triage_plugin] Triage Receiver — Telegram callback verdict layer (reusable, owns no table)",
           "component": "n8n/workflows/triage-receiver.json",
-          "published": false
+          "published": true
         }
       ],
       "supabaseTables": []

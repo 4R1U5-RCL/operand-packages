@@ -1,0 +1,313 @@
+{
+  "name": "[TEMPLATE] GitHub Schedule Dispatcher",
+  "nodes": [
+    {
+      "id": "every-5-minutes",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-due-rows",
+      "name": "Read Due Rows",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/ops_schedule?select=*&enabled=eq.true&due_at=not.is.null",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase",
+          "name": "[STUDIO] Supabase service_role"
+        }
+      }
+    },
+    {
+      "id": "unwrap-rows",
+      "name": "Unwrap Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const resp = it.json || {};\n  // PAT-4 guard: body may be '' (empty 200) or — on hosted n8n Cloud — already\n  // parsed (JSON content-types come back PRE-PARSED, LIVE 2026-07-07). Object-first.\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = [rows];\n  for (const r of rows) {\n    // Shape guard only (the PostgREST query already filtered enabled=true):\n    // malformed rows without a parseable due_at never reach the strict filter.\n    if (!r || r.enabled !== true || !r.due_at || Number.isNaN(Date.parse(r.due_at))) continue;\n    out.push({ json: r });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "select-due",
+      "name": "Select Due",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "filterType": "manual",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "select-due-cond",
+              "leftValue": "={{ new Date($json.due_at).getTime() <= Date.now() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "stamp-dispatch-fields",
+      "name": "Stamp Dispatch Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const now = Date.now();\nconst nowIso = new Date(now).toISOString();\nconst out = [];\nfor (const it of $input.all()) {\n  const r = it.json || {};\n  // Drop the filter's TE-5 placeholder: zero due rows must mean zero dispatches.\n  if (!r.id || !r.due_at) continue;\n  const due = Date.parse(r.due_at);\n  if (Number.isNaN(due)) continue;\n  const hours = Number(r.payload && r.payload.interval_hours) || 24; // nightly default\n  let next = due;\n  do { next += hours * 3600000; } while (next <= now); // anchored advance, skip missed slots\n  out.push({ json: {\n    id: r.id,\n    task_id: r.task_id,\n    last_dispatched_at: nowIso,\n    due_at_next: new Date(next).toISOString(),\n  } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "dispatch-github-workflow",
+      "name": "Dispatch GitHub Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/4R1U5-RCL/packages/actions/workflows/nightly-sweep.yml/dispatches",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ref: \"main\", inputs: { dry_run: \"true\" } }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "githubApi": {
+          "id": "cred-ref:github",
+          "name": "Github FG-PAT"
+        }
+      }
+    },
+    {
+      "id": "drop-failed-dispatches",
+      "name": "Drop Failed Dispatches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().filter((it) => ((it.json && it.json.statusCode) || 500) < 300);"
+      }
+    },
+    {
+      "id": "mark-dispatched",
+      "name": "Mark Dispatched",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/ops_schedule?id=eq.{{ $('Stamp Dispatch Fields').item.json.id }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ last_dispatched_at: $('Stamp Dispatch Fields').item.json.last_dispatched_at, due_at: $('Stamp Dispatch Fields').item.json.due_at_next }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase",
+          "name": "[STUDIO] Supabase service_role"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Read Due Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Due Rows": {
+      "main": [
+        [
+          {
+            "node": "Unwrap Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unwrap Rows": {
+      "main": [
+        [
+          {
+            "node": "Select Due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Due": {
+      "main": [
+        [
+          {
+            "node": "Stamp Dispatch Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp Dispatch Fields": {
+      "main": [
+        [
+          {
+            "node": "Dispatch GitHub Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch GitHub Workflow": {
+      "main": [
+        [
+          {
+            "node": "Drop Failed Dispatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drop Failed Dispatches": {
+      "main": [
+        [
+          {
+            "node": "Mark Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

@@ -1,0 +1,262 @@
+{
+  "name": "[TEMPLATE] [dirnotif_plugin] Lead Enrichment — LLM Add-on",
+  "nodes": [
+    {
+      "id": "when-called",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "validate-lead",
+      "name": "Validate Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst pick = (...vals) => {\n  for (const v of vals) {\n    if (v === null || v === undefined) continue;\n    const s = String(v).trim();\n    if (s) return s;\n  }\n  return null;\n};\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const env = (j.body && typeof j.body === 'object') ? j.body : j;\n  const lead = (env.lead && typeof env.lead === 'object') ? env.lead : env;\n  out.push({ json: { __lead: {\n    source: pick(lead.source, env.source),\n    external_id: pick(lead.external_id, env.external_id, env.id),\n    url: pick(lead.url, env.url),\n    title: pick(lead.title, env.title),\n    body: pick(lead.body, env.body, env.message),\n    author: pick(lead.author, env.author),\n    posted_at: pick(lead.posted_at, env.posted_at, env.created_at),\n  } } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "spend-check",
+      "name": "Spend Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"DIRNOTIF_LLM_DAILY_BUDGET_USD\"));\nconst capOk = Number.isFinite(CAP);\nconst s = $getWorkflowStaticData('global');\nconst today = new Date().toISOString().slice(0, 10);\nif (s.dirnotif_spend_day !== today) { s.dirnotif_spend_day = today; s.dirnotif_spend_usd = 0; }\nconst items = $input.all();\n// n8n Cloud freezes Code-node input items (IN-25): RETURN new items so the spend\n// gate reads __spend_ok and Clamp reads __t0.\nreturn items.map((it) => {\n  const item = { json: Object.assign({}, it.json, {\n    // Fail closed: no reachable numeric cap => spend NOT ok.\n    __spend_ok: capOk && (Number(s.dirnotif_spend_usd) || 0) < CAP,\n    __t0: Date.now(),\n  }) };\n  if (it.binary) item.binary = it.binary;\n  return item;\n});"
+      }
+    },
+    {
+      "id": "spend-gate",
+      "name": "Spend Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "spend-gate-cond",
+              "leftValue": "={{ $json.__spend_ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "llm-score",
+      "name": "LLM Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 120000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Title",
+              "value": "STUDIO dirnotif-enrichment"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"anthropic/claude-haiku-4-5\", temperature: 0, max_tokens: 512, messages: ([{ role: \"user\", content: \"You are a lead-triage analyst reading a PUBLIC community post (Reddit, Hacker News, or a forum). Decide whether the poster is a potential CLIENT lead. Reply with ONLY a minified JSON object — no markdown, no code fences — with exactly these keys: is_relevant (boolean), lead_type (one of hiring, asking_for_help, evaluating_tools, showcasing, discussion, off_topic), fit_score (integer 0 to 5), intent_score (integer 0 to 5), actionability_score (integer 0 to 5), budget_signal (one of none, low, med, high), urgency (one of low, med, high), category (a short label), why (one short sentence), suggested_angle (one sentence on how to genuinely HELP or answer the poster — NEVER a sales or product pitch), confidence (a number from 0 to 1). Use conservative scores when unsure; never invent facts.\" + \"\\n\\nPOST:\\n\" + JSON.stringify($json.__lead) }]) }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:openrouter",
+          "name": "[STUDIO] OpenRouter API"
+        }
+      }
+    },
+    {
+      "id": "clamp-score",
+      "name": "Clamp Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const LEAD_TYPES = ['hiring', 'asking_for_help', 'evaluating_tools', 'showcasing', 'discussion', 'off_topic'];\nconst BUDGETS = ['none', 'low', 'med', 'high'];\nconst URGENCIES = ['low', 'med', 'high'];\nconst MODEL = \"anthropic/claude-haiku-4-5\";\nconst MAX = 280;\nconst s = $getWorkflowStaticData('global');\nconst ctxItems = $('Spend Check').all();\nconst items = $input.all();\nconst out = [];\nconst NULL_SCORES = {\n  is_relevant: null, lead_type: null, fit_score: null, intent_score: null,\n  actionability_score: null, budget_signal: null, urgency: null, category: null,\n  why: null, suggested_angle: null, confidence: null,\n};\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctxItems[i] || ctxItems[0] || { json: {} }).json;\n  const now = new Date().toISOString();\n  const status = Number(resp.statusCode || 0);\n  // Hosted n8n Cloud hands JSON content-type bodies back PRE-PARSED as objects\n  // (LIVE-PROVEN 2026-07-07). Parse OBJECT-FIRST; keep the failure-trace branches.\n  const rawBody = resp.body;\n  const bodyEmpty = !(rawBody && typeof rawBody === 'object') && !String(rawBody ?? '').trim();\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(rawBody);\n  const usage = (parsed && parsed.usage) || {};\n  const tokensIn = Number(usage.prompt_tokens || 0);\n  const tokensOut = Number(usage.completion_tokens || 0);\n  const cost = (tokensIn + tokensOut) / 1e6; // coarse estimate; studio reconciles out of band\n  s.dirnotif_spend_usd = (Number(s.dirnotif_spend_usd) || 0) + cost;\n  const latency = Date.now() - Number(c.__t0 || Date.now());\n  const fail = (reason) => Object.assign({}, NULL_SCORES, { enriched: false, reason: reason, attempted_at: now });\n  const clampInt = (x) => { const n = Math.round(Number(x)); return Number.isFinite(n) ? Math.min(5, Math.max(0, n)) : 0; };\n  const str = (x, n) => (typeof x === 'string' && x.trim()) ? x.slice(0, n) : null;\n\n  let e;\n  if (bodyEmpty) {\n    e = fail('llm_timeout');\n  } else if (status < 200 || status >= 300) {\n    e = fail('llm_error');\n  } else if (!parsed) {\n    e = fail('parse_error');\n  } else {\n    const content = parsed.choices && parsed.choices[0]\n      && parsed.choices[0].message && parsed.choices[0].message.content;\n    let v = null;\n    if (typeof content === 'string') {\n      const stripped = content.replace(/^\\s*```[a-z]*\\s*/i, '').replace(/\\s*```\\s*$/, '');\n      try { v = JSON.parse(stripped); } catch (e2) { v = null; }\n    } else if (content && typeof content === 'object') {\n      v = content;\n    }\n    if (!v || typeof v !== 'object') {\n      e = fail('parse_error');\n    } else if (!LEAD_TYPES.includes(v.lead_type)) {\n      e = fail('validation_error');\n    } else {\n      let conf = Number(v.confidence);\n      if (!Number.isFinite(conf)) conf = 0;\n      conf = Math.min(1, Math.max(0, conf));\n      e = {\n        enriched: true,\n        is_relevant: v.is_relevant === true,\n        lead_type: v.lead_type,\n        fit_score: clampInt(v.fit_score),\n        intent_score: clampInt(v.intent_score),\n        actionability_score: clampInt(v.actionability_score),\n        budget_signal: BUDGETS.includes(v.budget_signal) ? v.budget_signal : 'none',\n        urgency: URGENCIES.includes(v.urgency) ? v.urgency : 'low',\n        category: str(v.category, 80),\n        why: str(v.why, MAX),\n        suggested_angle: str(v.suggested_angle, MAX),\n        confidence: conf,\n        model: MODEL,\n        tokens_in: tokensIn,\n        tokens_out: tokensOut,\n        cost_usd: cost,\n        latency_ms: latency,\n        enriched_at: now,\n      };\n    }\n  }\n  out.push({ json: e });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "spend-cap-trace",
+      "name": "Spend-Cap Trace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const NULL_SCORES = {\n  is_relevant: null, lead_type: null, fit_score: null, intent_score: null,\n  actionability_score: null, budget_signal: null, urgency: null, category: null,\n  why: null, suggested_angle: null, confidence: null,\n};\nconst now = new Date().toISOString();\nreturn $input.all().map(() => ({ json:\n  Object.assign({}, NULL_SCORES, { enriched: false, reason: 'spend_cap', attempted_at: now }) }));"
+      }
+    },
+    {
+      "id": "return-partial",
+      "name": "Return Partial",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      },
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Validate Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Lead": {
+      "main": [
+        [
+          {
+            "node": "Spend Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Check": {
+      "main": [
+        [
+          {
+            "node": "Spend Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend Gate": {
+      "main": [
+        [
+          {
+            "node": "LLM Score",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Spend-Cap Trace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Score": {
+      "main": [
+        [
+          {
+            "node": "Clamp Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clamp Score": {
+      "main": [
+        [
+          {
+            "node": "Return Partial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spend-Cap Trace": {
+      "main": [
+        [
+          {
+            "node": "Return Partial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
