@@ -1,0 +1,1321 @@
+{
+  "name": "[TEMPLATE] [reactivation_plugin] Campaign Cadence Dispatcher",
+  "nodes": [
+    {
+      "id": "cadence-tick",
+      "name": "Cadence Tick",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "claim-due-events",
+      "name": "Claim Due Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tmpl_reactivation_events?status=eq.pending&due_at=lte.{{ encodeURIComponent(new Date().toISOString()) }}&order=due_at.asc&limit=50&select=*,contact:tmpl_reactivation_contacts(id,timezone,email,phone,name,status)",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"claimed\", claimed_at: new Date().toISOString() }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "explode-claimed",
+      "name": "Explode Claimed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const resp = it.json || {};\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  for (const r of rows) {\n    if (!r || typeof r !== 'object') continue;\n    const c = (r.contact && typeof r.contact === 'object') ? r.contact : {};\n    out.push({ json: {\n      __event: {\n        id: r.id != null ? r.id : null,\n        contact_id: r.contact_id != null ? r.contact_id : null,\n        channel: (r.channel || '').toString().toLowerCase() || null,\n        step: r.step != null ? r.step : null,\n        template_copy: r.template_copy != null ? r.template_copy : '',\n        subject: r.subject != null ? r.subject : null,\n      },\n      __contact: {\n        id: c.id != null ? c.id : (r.contact_id != null ? r.contact_id : null),\n        timezone: c.timezone != null ? c.timezone : null,\n        email: c.email != null ? c.email : null,\n        phone: c.phone != null ? c.phone : null,\n        name: c.name != null ? c.name : null,\n        status: c.status != null ? c.status : null,\n      },\n      // the copy actually delivered — template_copy until the seam personalises it.\n      __copy: r.template_copy != null ? r.template_copy : '',\n    } });\n  }\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "quiet-hours",
+      "name": "Quiet Hours",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const START = 9;\nconst END = 21;\nconst localHour = (tz) => {\n  if (!tz) return null;\n  try {\n    const s = new Intl.DateTimeFormat('en-US', { timeZone: String(tz), hour: 'numeric', hour12: false }).format(new Date());\n    const h = parseInt(String(s).replace(/[^0-9]/g, ''), 10);\n    return Number.isFinite(h) ? (h % 24) : null;\n  } catch (e) { return null; }\n};\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const h = localHour(j.__contact && j.__contact.timezone);\n  // Unresolved tz (h === null) → NOT ok: gate the send (defer), never guess.\n  const ok = (h !== null) && (h >= START) && (h < END);\n  out.push({ json: Object.assign({}, j, { __quiet_ok: ok }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "within-send-window",
+      "name": "Within Send Window?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "within-send-window-cond",
+              "leftValue": "={{ $json.__quiet_ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "requeue-quiet",
+      "name": "Requeue Quiet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        220
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tmpl_reactivation_events?id=eq.{{ encodeURIComponent($json.__event.id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"pending\", claimed_at: null }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "suppression-check",
+      "name": "Suppression Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/suppression_list?select=email,phone&or=(email.eq.{{ encodeURIComponent(($json.__contact.email || \"\").toLowerCase()) }},phone.eq.{{ encodeURIComponent($json.__contact.phone || \"\") }})",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "apply-suppression",
+      "name": "Apply Suppression",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Quiet Hours').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const email = (c.__contact && c.__contact.email ? String(c.__contact.email) : '').toLowerCase();\n  const phone = (c.__contact && c.__contact.phone ? String(c.__contact.phone) : '');\n  const suppressed = rows.some((r) => r && (\n    (email && String(r.email || '').toLowerCase() === email) ||\n    (phone && String(r.phone || '') === phone)\n  ));\n  out.push({ json: Object.assign({}, c, { __suppressed: suppressed }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "suppressed",
+      "name": "Suppressed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "suppressed-cond",
+              "leftValue": "={{ $json.__suppressed === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "suppress-event",
+      "name": "Suppress Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        -220
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tmpl_reactivation_events?id=eq.{{ encodeURIComponent($json.__event.id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"suppressed\" }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "suppress-contact",
+      "name": "Suppress Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        -220
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tmpl_reactivation_contacts?id=eq.{{ encodeURIComponent($json.__contact.id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"suppressed\" }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "throttle-gate",
+      "name": "Throttle Gate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/incr_send_quota",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_window_start: new Date().toISOString().slice(0,13), p_channel: \"reactivation\", p_sender_id: \"reactivation-default\", p_limit: 500 }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "apply-throttle",
+      "name": "Apply Throttle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Apply Suppression').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  const v = Array.isArray(parsed) ? parsed[0] : parsed;\n  const ok = !!(v && v.allowed === true);\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: Object.assign({}, c, { __throttle_ok: ok }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "under-cap",
+      "name": "Under Cap?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "under-cap-cond",
+              "leftValue": "={{ $json.__throttle_ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "requeue-throttle",
+      "name": "Requeue Throttle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        220
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tmpl_reactivation_events?id=eq.{{ encodeURIComponent($json.__event.id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"pending\", claimed_at: null }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "llm-spend-read",
+      "name": "LLM Spend Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/global_send_quotas?select=spend_usd,count&channel=eq.llm&sender_id=eq.llm-daily&window_start=eq.{{ encodeURIComponent(new Date().toISOString().slice(0,10)) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "llm-gate",
+      "name": "LLM Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst CAP = Number(readSecret(\"REACTIVATION_LLM_DAILY_BUDGET_USD\"));\nconst capOk = Number.isFinite(CAP);\nconst ctx = $('Apply Throttle').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  let rows = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(resp.body);\n  if (!Array.isArray(rows)) rows = rows ? [rows] : [];\n  const row = rows[0] || {};\n  const spent = Number(row.spend_usd != null ? row.spend_usd : (row.count != null ? row.count : 0)) || 0;\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const underCap = capOk ? (spent < CAP) : false;\n  out.push({ json: Object.assign({}, c, { __llm_under_cap: underCap }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "personalize",
+      "name": "Personalize?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "personalize-cond",
+              "leftValue": "={{ (($vars.REACTIVATION_PERSONALIZE_WORKFLOW_ID || \"\") || \"\") !== \"\" && $json.__llm_under_cap === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "personalize-copy",
+      "name": "Personalize Copy",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3080,
+        -160
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.REACTIVATION_PERSONALIZE_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "merge-copy",
+      "name": "Merge Copy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('LLM Gate').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const copy = (typeof p.copy === 'string' && p.copy.trim()) ? p.copy : c.__copy;\n  const subject = (typeof p.subject === 'string' && p.subject.trim())\n    ? p.subject : (c.__event ? c.__event.subject : null);\n  const ev = Object.assign({}, c.__event, { subject: subject });\n  out.push({ json: Object.assign({}, c, { __copy: copy, __event: ev }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-personalize",
+      "name": "Skip Personalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        160
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));"
+      }
+    },
+    {
+      "id": "llm-circuit-open",
+      "name": "LLM Circuit Open?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "llm-circuit-open-cond",
+              "leftValue": "={{ (($vars.REACTIVATION_PERSONALIZE_WORKFLOW_ID || \"\") || \"\") !== \"\" && $json.__llm_under_cap === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sign-alert",
+      "name": "Sign Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json;\n  const payload = {\n    message: '🚨 REACTIVATION: daily LLM personalize cap reached — cadence continues on template copy (no personalisation).',\n    kind: 'circuit_breaker',\n    subsystem: 'reactivation-cadence',\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __alert_payload: payload,\n    __alert_ts: ts,\n    __alert_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-circuit",
+      "name": "Notify Circuit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3740,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__alert_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__alert_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__alert_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "choose-channel",
+      "name": "Choose Channel",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        3520,
+        -160
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "choose-channel-r0",
+                    "leftValue": "={{ $json.__event.channel }}",
+                    "rightValue": "email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "email"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "choose-channel-r1",
+                    "leftValue": "={{ $json.__event.channel }}",
+                    "rightValue": "sms",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "sms"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "compose-email",
+      "name": "Compose Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -280
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json;\n  const to = j.__contact && j.__contact.email ? j.__contact.email : null;\n  const subject = (j.__event && j.__event.subject) ? j.__event.subject : 'A quick note';\n  return { json: Object.assign({}, j, { __email_to: to, __email_subject: subject }) };\n});"
+      }
+    },
+    {
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3960,
+        -280
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: $vars.REACTIVATION_FROM_ADDRESS, to: [$json.__email_to], subject: $json.__email_subject, text: $json.__copy }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:resend",
+          "name": "[STUDIO] Resend API"
+        }
+      }
+    },
+    {
+      "id": "record-email",
+      "name": "Record Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        -280
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Compose Email\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const ok = status >= 200 && status < 300;\n  const body = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let msgId = null;\n  if (body && typeof body === 'object') {\n    msgId = body.id || body.message_id || body.sid || (body.data && body.data.id) || null;\n  }\n  out.push({ json: Object.assign({}, c, {\n    __sent_ok: ok,\n    __provider_msg_id: msgId,\n    __event_status: ok ? 'sent' : 'failed',\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-email-result",
+      "name": "Write Email Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4400,
+        -280
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tmpl_reactivation_events?id=eq.{{ encodeURIComponent($json.__event.id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: $json.__event_status, provider_msg_id: $json.__provider_msg_id, sent_at: $json.__sent_ok ? new Date().toISOString() : null }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "compose-sms",
+      "name": "Compose SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json;\n  const to = j.__contact && j.__contact.phone ? j.__contact.phone : null;\n  return { json: Object.assign({}, j, { __sms_to: to }) };\n});"
+      }
+    },
+    {
+      "id": "send-sms",
+      "name": "Send SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3960,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SMS_PROVIDER_SEND_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to: $json.__sms_to, body: $json.__copy }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:sms-provider",
+          "name": "[STUDIO] SMS Provider"
+        }
+      }
+    },
+    {
+      "id": "record-sms",
+      "name": "Record SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        -40
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Compose SMS\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  const status = Number(resp.statusCode || 0);\n  const ok = status >= 200 && status < 300;\n  const body = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let msgId = null;\n  if (body && typeof body === 'object') {\n    msgId = body.id || body.message_id || body.sid || (body.data && body.data.id) || null;\n  }\n  out.push({ json: Object.assign({}, c, {\n    __sent_ok: ok,\n    __provider_msg_id: msgId,\n    __event_status: ok ? 'sent' : 'failed',\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-sms-result",
+      "name": "Write SMS Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        4400,
+        -40
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tmpl_reactivation_events?id=eq.{{ encodeURIComponent($json.__event.id) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: $json.__event_status, provider_msg_id: $json.__provider_msg_id, sent_at: $json.__sent_ok ? new Date().toISOString() : null }) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cadence Tick": {
+      "main": [
+        [
+          {
+            "node": "Claim Due Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Due Events": {
+      "main": [
+        [
+          {
+            "node": "Explode Claimed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explode Claimed": {
+      "main": [
+        [
+          {
+            "node": "Quiet Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quiet Hours": {
+      "main": [
+        [
+          {
+            "node": "Within Send Window?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within Send Window?": {
+      "main": [
+        [
+          {
+            "node": "Suppression Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requeue Quiet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suppression Check": {
+      "main": [
+        [
+          {
+            "node": "Apply Suppression",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Suppression": {
+      "main": [
+        [
+          {
+            "node": "Suppressed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suppressed?": {
+      "main": [
+        [
+          {
+            "node": "Suppress Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Throttle Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suppress Event": {
+      "main": [
+        [
+          {
+            "node": "Suppress Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Throttle Gate": {
+      "main": [
+        [
+          {
+            "node": "Apply Throttle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Throttle": {
+      "main": [
+        [
+          {
+            "node": "Under Cap?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Under Cap?": {
+      "main": [
+        [
+          {
+            "node": "LLM Spend Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requeue Throttle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Spend Read": {
+      "main": [
+        [
+          {
+            "node": "LLM Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Gate": {
+      "main": [
+        [
+          {
+            "node": "Personalize?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalize?": {
+      "main": [
+        [
+          {
+            "node": "Personalize Copy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Personalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalize Copy": {
+      "main": [
+        [
+          {
+            "node": "Merge Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Personalize": {
+      "main": [
+        [
+          {
+            "node": "LLM Circuit Open?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Choose Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Circuit Open?": {
+      "main": [
+        [
+          {
+            "node": "Sign Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Alert": {
+      "main": [
+        [
+          {
+            "node": "Notify Circuit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Copy": {
+      "main": [
+        [
+          {
+            "node": "Choose Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choose Channel": {
+      "main": [
+        [
+          {
+            "node": "Compose Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compose SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Email": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Record Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Email": {
+      "main": [
+        [
+          {
+            "node": "Write Email Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose SMS": {
+      "main": [
+        [
+          {
+            "node": "Send SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS": {
+      "main": [
+        [
+          {
+            "node": "Record SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record SMS": {
+      "main": [
+        [
+          {
+            "node": "Write SMS Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

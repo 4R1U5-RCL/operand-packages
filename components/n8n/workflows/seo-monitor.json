@@ -157,7 +157,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.FIRECRAWL_HOST || 'https://api.firecrawl.dev')/v2/scrape",
+        "url": "={{ (($vars.FIRECRAWL_HOST || 'https://api.firecrawl.dev')) + '/v2/scrape' }}",
         "options": {
           "response": {
             "response": {
@@ -298,6 +298,21 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "id": "restore-spend-ctx",
+      "name": "Restore Spend Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        -420
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Meter Spend\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
     },
     {
       "id": "collect-current",
@@ -728,6 +743,17 @@
       ]
     },
     "Spend Increment": {
+      "main": [
+        [
+          {
+            "node": "Restore Spend Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Spend Ctx": {
       "main": [
         [
           {

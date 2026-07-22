@@ -1,0 +1,181 @@
+{
+  "name": "[TEMPLATE] Dead-Man’s Switch (heartbeat staleness → Telegram)",
+  "nodes": [
+    {
+      "id": "every-30-minutes",
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/30 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-heartbeats",
+      "name": "Read Heartbeats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/device_heartbeats?select=*",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase",
+          "name": "[STUDIO] Supabase service_role"
+        }
+      }
+    },
+    {
+      "id": "gate",
+      "name": "Gate",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "filterType": "manual",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "gate-cond",
+              "leftValue": "run",
+              "rightValue": "run",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "format-alerts",
+      "name": "Format Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const WINDOW_MS = 7200000;\nconst now = Date.now();\n// PAT-4 guard: parse the RAW read (pre-filter). Hosted n8n Cloud hands JSON bodies\n// back PRE-PARSED (LIVE 2026-07-07) — parse OBJECT-FIRST, never .toString()+parse.\nconst rows = [];\nfor (const it of $('Read Heartbeats').all()) {\n  const j = it.json || {};\n  const body = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return []; try { return JSON.parse(__s); } catch (__e) { return []; } })(j.body);\n  if (Array.isArray(body)) rows.push(...body);\n  else if (body && typeof body === 'object') rows.push(body);\n}\n// EMPTY table = the runner has NEVER checked in — that is the loudest failure\n// mode, not a pass. ONE distinct alert.\nif (rows.length === 0) {\n  return [{ json: { __text:\n    '🚨 DEAD-MANS SWITCH: no heartbeats at all — the heartbeat table is EMPTY; the runner has never checked in.' } }];\n}\nconst alerts = [];\nfor (const r of rows) {\n  const seen = Date.parse(r.last_seen_at || '') || 0;\n  if (seen > now - WINDOW_MS) continue; // fresh — nothing to say\n  const mins = Math.round((now - seen) / 60000);\n  const who = r.device_id || 'unknown-device';\n  alerts.push(seen === 0\n    ? '🚨 DEAD-MANS SWITCH: ' + who + ' has no last_seen_at — never checked in.'\n    : '🚨 DEAD-MANS SWITCH: ' + who + ' stale — ' + mins + ' min since last heartbeat.');\n}\n// All fresh ⇒ zero items ⇒ the Telegram node does not run. Silence = healthy.\nreturn alerts.map((a) => ({ json: { __text: a } }));"
+      }
+    },
+    {
+      "id": "alert-telegram",
+      "name": "Alert Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $vars.TELEGRAM_DEFAULT_CHAT }}",
+        "text": "={{ $json.__text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-ref:telegram",
+          "name": "[STUDIO] Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Read Heartbeats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Heartbeats": {
+      "main": [
+        [
+          {
+            "node": "Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate": {
+      "main": [
+        [
+          {
+            "node": "Format Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alerts": {
+      "main": [
+        [
+          {
+            "node": "Alert Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

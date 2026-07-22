@@ -2,7 +2,7 @@
   "brick": "content-tracker",
   "generatedBy": "scripts/assemble-bricks.mjs",
   "components": {
-    "n8n/workflows/content-tracker.json": "bba4fcb68c0dd6bcbe9a265d550ac903f3b4ec6de1207610a44004ed56bb86f5",
+    "n8n/workflows/content-tracker.json": "f4e3421b119cceca9a88a5b18efd2d34c4a2f5f319b77c088ebac12441ff871c",
     "Webapp/spend-gate": "e84e15e42d6532496566ece28b52f578dd388537b272ac1334d3026b806ddabe",
     "supabase/templates/content-tracker.sql": "e4d94cd150301f413aa4a5553ad50542392fd6c0ea9c369b871390bc60d20ec2"
   }

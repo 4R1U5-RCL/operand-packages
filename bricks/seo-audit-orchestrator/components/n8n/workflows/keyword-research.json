@@ -242,7 +242,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/keyword_ideas/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/dataforseo_labs/google/keyword_ideas/live' }}",
         "options": {
           "response": {
             "response": {
@@ -265,12 +265,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify([{ keywords: $json.__seed_terms, location_name: $json.__location, language_name: $json.__language, limit: 100, order_by: ['keyword_info.search_volume,desc'] }]) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -302,7 +302,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/bulk_keyword_difficulty/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/dataforseo_labs/google/bulk_keyword_difficulty/live' }}",
         "options": {
           "response": {
             "response": {
@@ -325,12 +325,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify([{ keywords: ($json.__candidates || []).map((r) => r.keyword).slice(0, 1000), location_name: $json.__location, language_name: $json.__language }]) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -443,6 +443,21 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "id": "restore-spend-ctx",
+      "name": "Restore Spend Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        -420
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Meter Spend\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
     },
     {
       "id": "enrich",
@@ -843,6 +858,17 @@
       ]
     },
     "Spend Increment": {
+      "main": [
+        [
+          {
+            "node": "Restore Spend Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Spend Ctx": {
       "main": [
         [
           {

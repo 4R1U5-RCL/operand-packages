@@ -195,7 +195,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.FIRECRAWL_HOST || 'https://api.firecrawl.dev')/v1/scrape",
+        "url": "={{ (($vars.FIRECRAWL_HOST || 'https://api.firecrawl.dev')) + '/v1/scrape' }}",
         "options": {
           "response": {
             "response": {
@@ -302,7 +302,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')/v3/dataforseo_labs/google/bulk_keyword_difficulty/live",
+        "url": "={{ (($vars.DATAFORSEO_HOST || 'https://api.dataforseo.com')) + '/v3/dataforseo_labs/google/bulk_keyword_difficulty/live' }}",
         "options": {
           "response": {
             "response": {
@@ -325,12 +325,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify([{ keywords: ($json.__terms || []).slice(0, 1000), location_name: 'United States', language_name: 'English' }]) }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBasicAuth"
+        "nodeCredentialType": "httpHeaderAuth"
       },
       "alwaysOutputData": true,
       "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
       "credentials": {
-        "httpBasicAuth": {
+        "httpHeaderAuth": {
           "id": "cred-ref:dataforseo",
           "name": "[OPERAND] DataForSEO Basic"
         }
@@ -445,6 +445,21 @@
       "onError": "continueRegularOutput"
     },
     {
+      "id": "restore-spend-ctx",
+      "name": "Restore Spend Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        -420
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Meter Spend\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
       "id": "meter-spend-firecrawl",
       "name": "Meter Spend (Firecrawl)",
       "type": "n8n-nodes-base.code",
@@ -536,6 +551,21 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "id": "restore-spend-ctx-firecrawl",
+      "name": "Restore Spend Ctx (Firecrawl)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        -420
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $(\"Meter Spend (Firecrawl)\").all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  out.push({ json: c });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
     },
     {
       "id": "assess-content",
@@ -888,6 +918,17 @@
       "main": [
         [
           {
+            "node": "Restore Spend Ctx (Firecrawl)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Spend Ctx (Firecrawl)": {
+      "main": [
+        [
+          {
             "node": "Terms?",
             "type": "main",
             "index": 0
@@ -965,6 +1006,17 @@
       ]
     },
     "Spend Increment": {
+      "main": [
+        [
+          {
+            "node": "Restore Spend Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Spend Ctx": {
       "main": [
         [
           {

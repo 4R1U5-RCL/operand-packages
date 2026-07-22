@@ -1,0 +1,511 @@
+{
+  "name": "[TEMPLATE] [gsc_api_plugin] GSC Integration (live Search Console API) — mint → query → CTR/cannibalization findings → notify",
+  "nodes": [
+    {
+      "id": "every-week",
+      "name": "Every Week",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mint-gsc-token",
+      "name": "Mint GSC Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst __crypto = require('crypto');\nconst __b64url = (buf) => Buffer.from(buf).toString('base64')\n  .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');\nasync function mintGscToken(saKeyJson) {\n  try {\n    if (!saKeyJson) return { error: 'gsc_token_mint_failed: empty service-account key slot' };\n    let sa;\n    try { sa = JSON.parse(saKeyJson); } catch (e) { return { error: 'gsc_token_mint_failed: SA key JSON unparseable' }; }\n    if (!sa.client_email || !sa.private_key) return { error: 'gsc_token_mint_failed: SA key missing client_email/private_key' };\n    const now = Math.floor(Date.now() / 1000);\n    const header = __b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));\n    const claim = __b64url(JSON.stringify({\n      iss: sa.client_email,\n      scope: 'https://www.googleapis.com/auth/webmasters.readonly',\n      aud: 'https://oauth2.googleapis.com/token',\n      iat: now, exp: now + 3600,\n    }));\n    const signingInput = header + '.' + claim;\n    const signer = __crypto.createSign('RSA-SHA256');\n    signer.update(signingInput);\n    const sig = __b64url(signer.sign(sa.private_key));\n    const assertion = signingInput + '.' + sig;\n    const res = await fetch('https://oauth2.googleapis.com/token', {\n      method: 'POST',\n      headers: { 'content-type': 'application/x-www-form-urlencoded' },\n      body: 'grant_type=' + encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer') +\n            '&assertion=' + encodeURIComponent(assertion),\n    });\n    if (!res || !res.ok) return { error: 'gsc_token_mint_failed: token endpoint ' + (res ? res.status : 'unreachable') };\n    const body = await res.json();\n    if (!body || !body.access_token) return { error: 'gsc_token_mint_failed: no access_token in response' };\n    return { token: String(body.access_token) };\n  } catch (e) {\n    return { error: 'gsc_token_mint_failed: ' + (e && e.message ? e.message : String(e)) };\n  }\n}\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  let token = '', ok = true, reason = null;\n  try {\n    // GSC_MINT_JS exposes async mintGscToken(readSecret(credEnvVar)) → { token } | { error }.\n    const res = await mintGscToken(readSecret(\"GSC_CREDENTIALS_JSON\"));\n    token = (res && typeof res.token === 'string') ? res.token : '';\n    if (!token) { ok = false; reason = 'gsc_token_mint_failed'; }\n  } catch (e) { ok = false; reason = 'gsc_token_mint_failed'; token = ''; }\n  out.push({ json: Object.assign({}, j, {\n    __gsc_token: token,\n    __facts_ok: ok ? null : false,\n    __facts_reason: reason,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "query-gsc",
+      "name": "Query GSC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ (($vars.GSC_API_HOST || 'https://searchconsole.googleapis.com')) + '/webmasters/v3/sites/' + encodeURIComponent($json.__property) + '/searchAnalytics/query' }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + ($json.__gsc_token || \"\") }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify((function(){ var D=86400000; var days=Number($vars.SEO_GSC_LOOKBACK_DAYS)||28; var end=new Date(new Date(Date.now()).setUTCHours(0,0,0,0)); var start=new Date(end.getTime()-days*D); var d=function(x){return x.toISOString().slice(0,10);}; return { startDate: d(start), endDate: d(end), dimensions: ['query','page','date'], type: 'web', dataState: 'final', rowLimit: 5000 }; })()) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    },
+    {
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function safe(fn) { try { const v = fn(); return (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim(); } catch (e) { return null; } }\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const tenant = safe(() => (($vars.SEO_TENANT || 'operand'))) || 'operand';\n  const property = safe(() => ($vars.SEO_GSC_PROPERTY));\n  const day = (ms) => new Date(ms).toISOString().slice(0, 10);\n  const runMs = new Date(new Date(Date.now()).setUTCHours(0, 0, 0, 0)).getTime();\n  out.push({ json: Object.assign({}, j, {\n    __tenant: tenant,\n    __property: property,\n    __run_date: day(runMs),\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ingest-gsc-rows",
+      "name": "Ingest GSC Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "function num(v) {\n  if (v == null) return null;\n  const s = String(v).replace(/,/g, '').replace(/[^0-9.\\-]/g, '').trim();\n  if (s === '' || s === '-' || s === '.') return null;\n  const n = Number(s);\n  return Number.isFinite(n) ? n : null;\n}\nfunction dateVal(v) {\n  if (v == null) return null;\n  const s = String(v).trim();\n  const m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);\n  return m ? (m[1] + '-' + m[2] + '-' + m[3]) : null;\n}\nconst ctx = $('Read Config').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json || {};\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  // An upstream mint skip is honoured as-is — no pull happened, nothing to ingest.\n  if (c.__facts_ok === false) {\n    out.push({ json: Object.assign({}, c, { __rows: [], __facts_ok: false, __facts_reason: c.__facts_reason || 'gsc_token_mint_failed' }) });\n    continue;\n  }\n  const status = Number(resp.statusCode || 0);\n  const parsed = (function(__b){ if (__b && typeof __b === 'object') return __b; const __s = String(__b ?? '').trim(); if (!__s) return null; try { return JSON.parse(__s); } catch (__e) { return null; } })(resp.body);\n  let factsOk = false, reason = null, rows = [];\n  if (status === 401 || status === 403) { reason = 'gsc_unauthorized'; }\n  else if (status && (status < 200 || status >= 300)) { reason = 'gsc_error_' + (status || 'unknown'); }\n  else if (!parsed || typeof parsed !== 'object') { reason = 'gsc_unparseable'; }\n  else {\n    const gscRows = Array.isArray(parsed.rows) ? parsed.rows : null;\n    if (!gscRows) { reason = 'gsc_empty'; }\n    else {\n      for (const gr of gscRows) {\n        if (!gr || typeof gr !== 'object') continue;\n        // keys ordered by the request dimensions ['query','page','date'] — page/date optional.\n        const keys = Array.isArray(gr.keys) ? gr.keys : [];\n        const query = keys[0] != null ? String(keys[0]).trim() || null : null;\n        const page = keys[1] != null ? String(keys[1]).trim() || null : null;\n        const date = dateVal(keys[2]);\n        if (!query && !page) continue; // a row with no dimension is not a GSC data row\n        const clicks = num(gr.clicks);\n        const impressions = num(gr.impressions);\n        // GSC returns ctr as a 0–1 fraction already; a null-ctr row derives it like the CSV brick.\n        let ctr = (gr.ctr == null) ? null : num(gr.ctr);\n        let ctrDerived = false;\n        if (ctr == null && clicks != null && impressions != null && impressions > 0) { ctr = clicks / impressions; ctrDerived = true; }\n        const position = num(gr.position);\n        // Ignore a row that carries no metric at all (nothing to ground on).\n        if (clicks == null && impressions == null && ctr == null && position == null) continue;\n        rows.push({ query: query, page: page, clicks: clicks, impressions: impressions, ctr: ctr, ctr_derived: ctrDerived, position: position, date: date });\n      }\n      factsOk = rows.length > 0;\n      if (!factsOk) reason = 'gsc_empty';\n    }\n  }\n  out.push({ json: Object.assign({}, c, {\n    __rows: rows,\n    __facts_ok: factsOk,\n    __facts_reason: factsOk ? null : reason,\n  }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-performance",
+      "name": "Write Performance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_gsc_performance?on_conflict=tenant,property,query,page,date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__rows || []).map((r) => ({ tenant: $json.__tenant, property: ($json.__property || ''), query: (r.query || ''), page: (r.page || ''), clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position, date: (r.date || '0001-01-01'), run_date: $json.__run_date }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "compute-findings",
+      "name": "Compute Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst readNum = (k, d) => { const raw = readSecret(k); if (raw === '') return d; const n = Number(raw); return Number.isFinite(n) ? n : d; };\nconst FLOOR = readNum(\"SEO_GSC_IMPRESSION_FLOOR\", 100);\nconst SHORTFALL = readNum(\"SEO_GSC_CTR_SHORTFALL\", 0.6);\n// Fixed position→CTR band (fractions). A conservative published-average curve — a THRESHOLD, never\n// written as a measured metric.\nconst CURVE = { 1: 0.28, 2: 0.15, 3: 0.11, 4: 0.08, 5: 0.06, 6: 0.05, 7: 0.04, 8: 0.03, 9: 0.025, 10: 0.02 };\nfunction expectedCtr(pos) { if (pos == null || !Number.isFinite(pos)) return null; const p = Math.max(1, Math.round(pos)); return p > 10 ? 0.01 : CURVE[p]; }\nfunction hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return h; }\nfunction fid(cls, query, page) { return cls + '-' + hash(cls + '|' + (query || '') + '|' + (page || '')).toString(16); }\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const rows = Array.isArray(j.__rows) ? j.__rows : [];\n  const findings = [];\n  if (j.__facts_ok === true) {\n    // --- ctr_opportunity (per row) ---\n    for (const r of rows) {\n      const imp = Number(r.impressions);\n      const ctr = (r.ctr == null) ? null : Number(r.ctr);\n      const pos = (r.position == null) ? null : Number(r.position);\n      if (!Number.isFinite(imp) || imp < FLOOR) continue;\n      if (ctr == null) continue;\n      const exp = expectedCtr(pos);\n      if (exp == null) continue;\n      if (ctr < exp * SHORTFALL) {\n        findings.push({\n          finding_class: 'ctr_opportunity',\n          finding_id: fid('GSCCTR', r.query, r.page),\n          query: r.query || null,\n          page: r.page || null,\n          impressions: imp,\n          current_ctr: ctr,\n          position: pos,\n          expected_ctr: exp,\n          recommendation: 'High impressions with click-through below the expected band for this position — rewrite the title/meta to improve CTR.',\n          evidence: { impressions: imp, current_ctr: ctr, position: pos, expected_ctr: exp, expected_ctr_note: 'modeled-not-measured (position→CTR band)', ctr_derived: !!r.ctr_derived, shortfall: SHORTFALL, impression_floor: FLOOR },\n        });\n      }\n    }\n    // --- cannibalization (per query: ≥2 distinct pages) ---\n    const byQuery = {};\n    for (const r of rows) {\n      if (!r.query || !r.page) continue;\n      (byQuery[r.query] = byQuery[r.query] || []).push(r);\n    }\n    for (const q of Object.keys(byQuery)) {\n      const grp = byQuery[q];\n      const pages = {};\n      for (const r of grp) pages[r.page] = true;\n      const distinct = Object.keys(pages);\n      if (distinct.length >= 2) {\n        const totalImp = grp.reduce((a, r) => a + (Number(r.impressions) || 0), 0);\n        findings.push({\n          finding_class: 'cannibalization',\n          finding_id: fid('GSCCANN', q, null),\n          query: q,\n          page: null,\n          impressions: totalImp,\n          current_ctr: null,\n          position: null,\n          expected_ctr: null,\n          recommendation: distinct.length + ' of your pages rank for \"' + q + '\" — consolidate to a single canonical page to stop them competing.',\n          evidence: { query: q, competing_pages: distinct.slice(0, 20), page_count: distinct.length, total_impressions: totalImp },\n        });\n      }\n    }\n  }\n  out.push({ json: Object.assign({}, j, { __findings: findings }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "write-findings",
+      "name": "Write Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.OPERAND_SUPABASE_URL }}/rest/v1/tmpl_seo_gsc_findings?on_conflict=tenant,finding_id,run_date",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(($json.__findings || []).map((f) => ({ tenant: $json.__tenant, finding_id: f.finding_id, query: f.query, page: f.page, finding_class: f.finding_class, impressions: f.impressions, current_ctr: f.current_ctr, position: f.position, expected_ctr: f.expected_ctr, recommendation: f.recommendation, evidence: f.evidence, run_date: $json.__run_date }))) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-ref:supabase-operand",
+          "name": "[OPERAND] Supabase apikey"
+        }
+      }
+    },
+    {
+      "id": "draft",
+      "name": "Draft?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "draft-cond",
+              "leftValue": "={{ $json.__facts_ok === true && (($vars.SEO_GSC_DRAFT_WORKFLOW_ID || \"\") || \"\") !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "draft-suggestions",
+      "name": "Draft Suggestions",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1980,
+        -80
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.SEO_GSC_DRAFT_WORKFLOW_ID || \"\" }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach-drafts",
+      "name": "Attach Drafts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -80
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Compute Findings').all();\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const c = (ctx[i] || ctx[0] || { json: {} }).json;\n  let p = items[i].json || {};\n  if (p.body && typeof p.body === 'object') p = p.body; // envelope tolerance\n  const byId = (p && typeof p === 'object' && p.drafts && typeof p.drafts === 'object') ? p.drafts : {};\n  const findings = (Array.isArray(c.__findings) ? c.__findings : []).map((f) => {\n    const d = byId[f.finding_id];\n    const rec = (typeof d === 'string' && d.trim()) ? d.trim().slice(0, 1000) : f.recommendation;\n    return Object.assign({}, f, { recommendation: rec });\n  });\n  out.push({ json: Object.assign({}, c, { __findings: findings }) });\n}\nreturn out;"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "skip-drafts",
+      "name": "Skip Drafts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "return $input.all().map((it) => ({ json: it.json || {} }));"
+      }
+    },
+    {
+      "id": "sign-notify",
+      "name": "Sign Notify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst readSecret = (k) => {\n  let v = null;\n  try { v = $env[k]; } catch (e) {}\n  if (v === null || v === undefined || v === '') {\n    try { v = typeof $vars !== 'undefined' ? $vars[k] : null; } catch (e) {}\n  }\n  return (v === null || v === undefined) ? '' : String(v);\n};\nconst SECRET = readSecret(\"N8N_WEBHOOK_SECRET\");\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const rows = Array.isArray(j.__rows) ? j.__rows : [];\n  const findings = Array.isArray(j.__findings) ? j.__findings : [];\n  const factsOk = j.__facts_ok === true;\n  let message;\n  if (!factsOk) {\n    const why = j.__facts_reason ? (' (' + j.__facts_reason + ')') : '';\n    message = '📊 GSC API — no performance data could be read from Search Console' + why +\n      '. No metrics or findings are shown because none were returned from GSC.';\n  } else {\n    const ctrOpps = findings.filter((f) => f.finding_class === 'ctr_opportunity').length;\n    const cann = findings.filter((f) => f.finding_class === 'cannibalization').length;\n    const top = findings.slice().filter((f) => f.finding_class === 'ctr_opportunity').sort((a, b) => (Number(b.impressions) || 0) - (Number(a.impressions) || 0))[0];\n    const topTxt = top ? (' Top CTR opportunity: \"' + (top.query || top.page || '?') + '\" (' + (top.impressions || 0) + ' impressions, CTR ' + ((Number(top.current_ctr) * 100).toFixed(1)) + '%).') : '';\n    message = '📊 GSC API — ' + rows.length + ' rows ingested for ' + (j.__property || 'the property') +\n      '. ' + ctrOpps + ' CTR opportunity finding(s), ' + cann + ' cannibalization finding(s).' + topTxt;\n  }\n  const payload = {\n    message: String(message).slice(0, 3500),\n    kind: 'gsc_api',\n    tenant: j.__tenant || null,\n    property: j.__property || null,\n    run_date: j.__run_date || null,\n    facts_ok: factsOk,\n    row_count: rows.length,\n    finding_count: findings.length,\n  };\n  const ts = String(Date.now());\n  out.push({ json: Object.assign({}, j, {\n    __notify_payload: payload,\n    __notify_ts: ts,\n    __notify_sig: SECRET ? crypto.createHmac('sha256', SECRET).update(ts + '.' + JSON.stringify(payload)).digest('hex') : '',\n  }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "notify-report",
+      "name": "Notify Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.STUDIO_NOTIFY_FANOUT_URL }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-signature",
+              "value": "={{ $json.__notify_sig }}"
+            },
+            {
+              "name": "x-n8n-timestamp",
+              "value": "={{ $json.__notify_ts }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__notify_payload) }}"
+      },
+      "alwaysOutputData": true,
+      "notes": "PAT-4 guard: body may be an empty HTTP 200 — never JSON.parse blind. Use: const t=(response.body??'').toString(); t.trim()?JSON.parse(t):[]"
+    }
+  ],
+  "connections": {
+    "Every Week": {
+      "main": [
+        [
+          {
+            "node": "Mint GSC Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mint GSC Token": {
+      "main": [
+        [
+          {
+            "node": "Query GSC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query GSC": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Ingest GSC Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest GSC Rows": {
+      "main": [
+        [
+          {
+            "node": "Write Performance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Performance": {
+      "main": [
+        [
+          {
+            "node": "Compute Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Findings": {
+      "main": [
+        [
+          {
+            "node": "Write Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Findings": {
+      "main": [
+        [
+          {
+            "node": "Draft?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft?": {
+      "main": [
+        [
+          {
+            "node": "Draft Suggestions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Suggestions": {
+      "main": [
+        [
+          {
+            "node": "Attach Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Drafts": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Drafts": {
+      "main": [
+        [
+          {
+            "node": "Sign Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "active": false
+}
